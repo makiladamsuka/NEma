@@ -1,0 +1,8 @@
+pickle
+OpenCV.python
+numpy
+sklearn
+mediapipe
+os
+
+
