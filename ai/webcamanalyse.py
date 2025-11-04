@@ -3,7 +3,7 @@ import base64
 import time
 import cv2
 import io
-from PIL import Image
+from PIL import Imageq
 from openai import OpenAI
 # Removed dotenv and specific OpenRouter imports/configs as they are no longer needed
 
