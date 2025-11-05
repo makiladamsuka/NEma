@@ -1,0 +1,6 @@
+Python 3.9.6
+
+mediapipe - 0.10.21
+numpy - 1.26.4
+opencv-python - 4.8.0.74
+tensorflow  - 2.16.2
