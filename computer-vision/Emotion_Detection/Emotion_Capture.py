@@ -1,95 +1,116 @@
-import numpy as np
 import cv2
-import mediapipe as mp
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.image import img_to_array
-import os
+import numpy as np
+import tensorflow as tf
+from picamera2 import Picamera2
+# from libcamera import controls # Not needed since we removed AfMode control
 
-MODEL_FILENAME = 'media.h5'
-IMAGE_SIZE = (48, 48)
+# --- Configuration ---
+MODEL_PATH = 'media.tflite'
+EMOTION_LABELS = ['Happy', 'Smile']
+CONFIDENCE_THRESHOLD = 0.50 
 
-EMOTION_LABELS = ['Angry','Disgust','Fear','Happy', 'Sad','Natural', 'Suprise']
-FONT = cv2.FONT_HERSHEY_SIMPLEX
-PREDICTION_THRESHOLD = 0.4
-
-mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
-
-if not os.path.exists(MODEL_FILENAME):
-    exit()
-    
+# --- Model Initialization ---
 try:
-    model = load_model(MODEL_FILENAME)
+    interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+    interpreter.allocate_tensors()
 except Exception as e:
+    print(f"Error loading TFLite model: {e}")
+    # Note: If this fails, ensure 'media.tflite' is in the same directory.
     exit()
 
-cap = cv2.VideoCapture(0)
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+INPUT_SHAPE = input_details[0]['shape'] 
 
-if not cap.isOpened():
+# --- Face Detector Initialization (Revised for robustness) ---
+# Use the built-in path to the Haar Cascade file provided by the cv2 package
+HAAR_CASCADE_FILE = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+face_cascade = cv2.CascadeClassifier(HAAR_CASCADE_FILE)
+if face_cascade.empty():
+    print(f"Error loading Haar Cascade file at: {HAAR_CASCADE_FILE}")
     exit()
 
-with mp_face_detection.FaceDetection(
-    model_selection=1,
-    min_detection_confidence=0.7) as face_detection:
+# --- Picamera2 Setup (Fixed) ---
+print("Setting up Picamera2...")
+try:
+    picam2 = Picamera2()
     
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    # Configure the camera for a fast preview stream
+    config = picam2.create_preview_configuration(main={"size": (640, 480)}) 
+    picam2.configure(config)
+    
+    # FIX: The AfMode control has been removed as it causes errors on fixed-focus cameras (like IMX219)
+    # picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous}) 
+    
+    picam2.start()
+except Exception as e:
+    print(f"Error initializing Picamera2: {e}")
+    exit()
 
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+print("Camera started. Press 'q' to exit.")
 
-        results = face_detection.process(frame_rgb)
+# --- Main Loop ---
+while True:
+    # Get a frame from the camera
+    # capture_array() is the most efficient way to get a numpy array
+    frame = picam2.capture_array() 
+    
+    # Convert from RGB (Picamera2 default) to BGR (OpenCV default)
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-        if results.detections:
-            for detection in results.detections:
-                bbox_c = detection.location_data.relative_bounding_box
-                ih, iw, _ = frame.shape
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    # --- Face Detection ---
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(30, 30)
+    )
 
-                x = int(bbox_c.xmin * iw)
-                y = int(bbox_c.ymin * ih)
-                w = int(bbox_c.width * iw)
-                h = int(bbox_c.height * ih)
+    # --- Emotion Prediction ---
+    for (x, y, w, h) in faces:
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+        roi_gray = gray[y:y + h, x:x + w]
+        
+        # Resize and preprocess the face ROI for the TFLite model
+        resized_face = cv2.resize(roi_gray, (INPUT_SHAPE[1], INPUT_SHAPE[2]), interpolation=cv2.INTER_AREA)
+        input_data = resized_face.astype('float32') / 255.0
+        
+        # Adjust array dimensions to match TFLite input (e.g., [1, H, W, 1])
+        input_data = np.expand_dims(input_data, axis=0)
+        input_data = np.expand_dims(input_data, axis=-1)
+        input_data = input_data.reshape(INPUT_SHAPE) 
+        
+        # Run TFLite inference
+        interpreter.set_tensor(input_details[0]['index'], input_data) 
+        interpreter.invoke() 
 
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        predictions = interpreter.get_tensor(output_details[0]['index'])[0]
 
-                roi_gray = frame[y:y + h, x:x + w]
-                
-                if roi_gray.size != 0:
+        max_index = np.argmax(predictions)
+        max_confidence = predictions[max_index]
+        
+        # Determine emotion and confidence text
+        if max_confidence >= CONFIDENCE_THRESHOLD:
+            predicted_emotion = EMOTION_LABELS[max_index]
+            confidence_text = f"{predicted_emotion}: {max_confidence*100:.1f}%"
+            color = (0, 255, 0) # Green for confident prediction
+        else:
+            confidence_text = f"Uncertain: {max_confidence*100:.1f}%"
+            color = (0, 165, 255) # Orange for uncertain prediction
 
-                    roi_gray = cv2.cvtColor(roi_gray, cv2.COLOR_BGR2GRAY)
-                    roi_resized = cv2.resize(roi_gray, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
-                    roi_array = img_to_array(roi_resized)
-                    roi_array = roi_array / 255.0
-                    roi_array = np.expand_dims(roi_array, axis=0)
-                    roi_array = np.expand_dims(roi_array, axis=-1)
+        cv2.putText(frame, confidence_text, (x, y - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
-                    predictions = model.predict(roi_array, verbose=0)[0]
+    # --- Display ---
+    cv2.imshow('Emotion Detection', frame)
 
-                    predicted_index = np.argmax(predictions)
-                    confidence = predictions[predicted_index]
+    # --- Exit condition ---
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-                    if confidence > PREDICTION_THRESHOLD:
-                        predicted_emotion = EMOTION_LABELS[predicted_index]
-                        label = f"{predicted_emotion}: {confidence*100:.1f}%"
-                    else:
-                        label = "Detecting..."
-
-                    cv2.putText(
-                        frame,
-                        label,
-                        (x, y - 10),
-                        FONT,
-                        0.7,
-                        (0, 255, 0),
-                        2,
-                        cv2.LINE_AA
-                    )
-
-        cv2.imshow('Real-Time Emotion Detector', frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-cap.release()
+# --- Cleanup ---
+picam2.stop() # Stop the camera stream
 cv2.destroyAllWindows()
+print("Program terminated.")
