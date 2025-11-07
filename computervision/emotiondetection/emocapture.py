@@ -58,6 +58,7 @@ def process_frame(frame, interpreter, face_cascade, input_details, output_detail
     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     
+    # This call already uses keyword arguments and is correct:
     faces = face_cascade.detectMultiScale(
         gray,
         scaleFactor=1.1,
@@ -122,7 +123,11 @@ def main():
                     print(f"Detected Emotion: {result_text}")
  
                 gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, 1.1, 5, (30, 30))
+                # --- FIX APPLIED HERE ---
+                # Added '0' for the 'flags' argument to prevent 'minSize' (30, 30) 
+                # from being misinterpreted as 'flags'.
+                faces = face_cascade.detectMultiScale(gray, 1.1, 5, 0, (30, 30))
+                # ------------------------
                 
                 if i < len(faces):
                     (x, y, w, h) = faces[i]
@@ -158,11 +163,14 @@ def run_emotion_detector():
                 print(f"Detected Emotion: {result_text}")
 
             gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, 1.1, 5, (30, 30))
+            # --- FIX APPLIED HERE ---
+            # Added '0' for the 'flags' argument.
+            faces = face_cascade.detectMultiScale(gray, 1.1, 5, 0, (30, 30))
+            # ------------------------
             
             if i < len(faces):
-                (x, y, w, h) = faces[i]
-                return result_text
+                (x, y, w, h) = faces[i]          
+                return result_text.split(':')[0].strip().lower()
                   
         return None
          
