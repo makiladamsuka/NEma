@@ -5,8 +5,8 @@ from picamera2 import Picamera2
 import time
 
 
-MODEL_PATH = 'media.tflite'
-EMOTION_LABELS = ['Happy', 'Smile']
+MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/media.tflite'
+EMOTION_LABELS = ['loving', 'boring']
 CONFIDENCE_THRESHOLD = 0.50 
 INPUT_SHAPE = None 
 
