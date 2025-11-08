@@ -11,6 +11,7 @@ MODEL_PATH = 'media2.tflite'
 YUNET_MODEL_PATH = 'face_detection_yunet_2023mar.onnx' 
 YUNET_INPUT_SIZE = (320, 320) 
 
+
 EMOTION_LABELS = ['Happy','Smile']
 CONFIDENCE_THRESHOLD = 0.50
 
