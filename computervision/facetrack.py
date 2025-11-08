@@ -33,7 +33,7 @@ while True:
         gray_image,
         scaleFactor=1.1, # How much the image size is reduced at each image scale
         minNeighbors=5,  # How many neighbors each candidate rectangle should have
-        minSize=(40, 40) # Minimum face size to be considered a face
+        minSize=(60, 60) # Minimum face size to be considered a face
     )
 
     # Draw a rectangle (bounding box) around each detected face
