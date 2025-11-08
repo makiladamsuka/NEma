@@ -11,8 +11,8 @@ setup_and_start_display()
 
 
 while True:
-    emotion = run_emotion_detector()
-    print(f"Detected: {emotion}")
+    emotion, face_coordinates = run_emotion_detector()
+    print(f"Detected: {emotion} coordinates: {face_coordinates}")
     
     if emotion is not None:      
         print(f"-> Displaying **{emotion}**. Pausing detection...")
@@ -22,5 +22,5 @@ while True:
         
         # 4. Wait for the animation to (presumably) finish.
         # This is a simple, synchronous way to pause the detection loop.
-        time.sleep(1.0) # Pause detection for 1 second (adjust as needed for animation length)
+        time.sleep(5.0) # Pause detection for 1 second (adjust as needed for animation length)
         print("-> Detection resumed.")

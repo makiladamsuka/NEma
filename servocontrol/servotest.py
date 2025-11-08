@@ -21,7 +21,7 @@ def move_servos(pan_angle, tilt_angle):
 
 def main():
     while True:
-        user_input = input("Enter pan angle and tilt angle (e.g., 90 45): ")
+        user_input = input("Enter pan angle and tilt angle (e.g., 50-150 30-150): ")
         pan_str, tilt_str = user_input.split()
 
         pan_angle = int(pan_str)

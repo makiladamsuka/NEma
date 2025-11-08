@@ -3,7 +3,7 @@ import numpy as np
 import tensorflow as tf
 from picamera2 import Picamera2
 
-MODEL_PATH = 'media.tflite'
+MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/media.tflite'
 EMOTION_LABELS = ['Happy', 'Smile']
 CONFIDENCE_THRESHOLD = 0.50 
 
@@ -43,7 +43,7 @@ print("Camera started. Press 'q' to exit.")
 
 while True:
     frame = picam2.capture_array() 
-
+    
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -84,6 +84,7 @@ while True:
             confidence_text = f"Uncertain: {max_confidence*100:.1f}%"
 
         print(confidence_text)
+        
 
     print("nofaces detected")
 

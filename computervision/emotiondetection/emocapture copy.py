@@ -5,15 +5,12 @@ from picamera2 import Picamera2
 import time
 
 
-# --- Configuration ---
 MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/media.tflite'
 EMOTION_LABELS = ['loving', 'boring']
 CONFIDENCE_THRESHOLD = 0.50 
 INPUT_SHAPE = None 
-# MIN_FACE_SIZE is the threshold (in pixels) for face width/height
-MIN_FACE_SIZE = 80 
+MIN_FACE_SIZE = 80
 
-# --- Resource Loading Functions ---
 def load_resources():
     global INPUT_SHAPE
     
@@ -30,7 +27,7 @@ def load_resources():
     INPUT_SHAPE = input_details[0]['shape'] 
 
     print("Loading Haar Cascade classifier...")
-    HAAR_CASCADE_FILE = '/home/nema/Documents/NEma/computervision/emotiondetection/haarcascade_frontalface_default.xml'
+    HAAR_CASCADE_FILE = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
     face_cascade = cv2.CascadeClassifier(HAAR_CASCADE_FILE)
     if face_cascade.empty():
         print(f"Error loading Haar Cascade file at: {HAAR_CASCADE_FILE}")
@@ -55,18 +52,14 @@ def initialize_picam2():
         print(f"Error initializing Picamera2: {e}")
         exit()
 
-# --- Core Processing Function with Face Filtering ---
 def process_frame(frame, interpreter, face_cascade, input_details, output_details):
     if INPUT_SHAPE is None:
-        return [] # Return empty list on error
-    
-    cv2.imshow("Live Face Detection", frame)
-    # 1. Image Conversion
+        return ["Error: Model input shape not defined."]
+
     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     
-    # 2. Face Detection
-    # NOTE: The minSize=(30, 30) here is a pre-filter, but we will apply the MIN_FACE_SIZE filter after.
+    # This call already uses keyword arguments and is correct:
     faces = face_cascade.detectMultiScale(
         gray,
         scaleFactor=1.1,
@@ -75,24 +68,15 @@ def process_frame(frame, interpreter, face_cascade, input_details, output_detail
     )
 
     predictions_list = []
-    filtered_faces = [] # Store the faces that pass the size check
 
-    # 3. Face Filtering and Emotion Prediction
     for (x, y, w, h) in faces:
-        # 🟢 FACE SIZE FILTERING
-        if w < MIN_FACE_SIZE or h < MIN_FACE_SIZE:
-            # Skip faces smaller than the set threshold (i.e., too far away)
-            continue 
-            
-        # If the face is large enough, proceed with prediction and save the face location
-        filtered_faces.append((x, y, w, h))
-
+       
         roi_gray = gray[y:y + h, x:x + w]
         
-        # Preprocessing
         resized_face = cv2.resize(roi_gray, (INPUT_SHAPE[1], INPUT_SHAPE[2]), interpolation=cv2.INTER_AREA)
         input_data = resized_face.astype('float32') / 255.0
         
+
         input_data = np.expand_dims(input_data, axis=0) 
         input_data = np.expand_dims(input_data, axis=-1)
         
@@ -115,9 +99,8 @@ def process_frame(frame, interpreter, face_cascade, input_details, output_detail
 
         predictions_list.append(confidence_text)
     
-    return predictions_list, filtered_faces # Return both results and face locations
+    return predictions_list
 
-# --- Main Functions (Updated for Display) ---
 def main():
     print("\nStarting real-time detection. Press 'q' in the window to exit.")
 
@@ -125,11 +108,8 @@ def main():
         while True:
             frame = picam2.capture_array() 
 
-            # 1. Rotation (Still needed if camera is mounted upside down)
-            frame = cv2.rotate(frame, cv2.ROTATE_180) # Re-added the 180 rotation
-            
-            # 2. Process Frame and Get Results and Filtered Faces
-            emotion_results, faces = process_frame(
+            # 3. Process Frame and Get Results
+            emotion_results = process_frame(
                 frame, 
                 interpreter, 
                 face_cascade, 
@@ -137,35 +117,24 @@ def main():
                 output_details
             )
 
-            # Convert frame for display (now handled outside process_frame)
             frame_display = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-            # 3. Draw Results and Display
-            if not faces:
-                cv2.putText(frame_display, "No Close Faces Detected", (10, 50), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            
             for i, result_text in enumerate(emotion_results):
-                (x, y, w, h) = faces[i]
-                
-                # Print result (only the first face is printed to avoid spam)
                 if i == 0:
                     print(f"Detected Emotion: {result_text}")
+ 
+                gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
+                # --- FIX APPLIED HERE ---
+                # Added '0' for the 'flags' argument to prevent 'minSize' (30, 30) 
+                # from being misinterpreted as 'flags'.
+                faces = face_cascade.detectMultiScale(gray, 1.1, 5, 0, (30, 30))
+                # ------------------------
                 
-                # Draw bounding box
-                color = (0, 255, 0) if "Uncertain" not in result_text else (0, 165, 255)
-                cv2.rectangle(frame_display, (x, y), (x+w, y+h), color, 2)
-                
-                # Draw text
-                cv2.putText(frame_display, result_text, (x, y - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
-            
-            # Display the frame
-            cv2.imshow('Emotion Detection (Filtered by Size)', frame_display)
-
-            # Exit condition
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                if i < len(faces):
+                    (x, y, w, h) = faces[i]
+                    print(result_text)
+                    
+            print("No faces detected")
 
     except Exception as e:
         print(f"An unexpected error occurred during the loop: {e}")
@@ -173,41 +142,46 @@ def main():
     finally:
         print("\nCleaning up resources...")
         picam2.stop() 
-        cv2.destroyAllWindows()
         print("Program terminated.")
 
-# The run_emotion_detector function is simplified for a single-frame use case
 def run_emotion_detector():
     try:
-        # Get a single frame
+    
         frame = picam2.capture_array() 
         
-        # Apply the rotation used in main()
-        frame = cv2.rotate(frame, cv2.ROTATE_180) 
-        
-
-        # Process frame
-        emotion_results, faces = process_frame(
+        emotion_results = process_frame(
             frame, 
             interpreter, 
             face_cascade, 
             input_details, 
             output_details
         )
-       
-        if emotion_results:
-            # The emotion is the part before the colon
-            emotion = emotion_results[0].split(':')[0].strip().lower()
-            face_coordinates = faces[0] # (x, y, w, h)
-            return emotion, face_coordinates
-            
-        return None, None # No face found
-            
-    except Exception as e:
-        print(f"An unexpected error occurred in run_emotion_detector: {e}")
-        return None
 
-# --- Program Entry ---
+        frame_display = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        for i, result_text in enumerate(emotion_results):
+            if i == 0:
+                print(f"Detected Emotion: {result_text}")
+
+            gray = cv2.cvtColor(frame_display, cv2.COLOR_BGR2GRAY)
+            # --- FIX APPLIED HERE ---
+            # Added '0' for the 'flags' argument.
+            faces = face_cascade.detectMultiScale(gray, 1.1, 5, 0, (30, 30))
+            # ------------------------
+            
+            if i < len(faces):
+                (x, y, w, h) = faces[i]          
+                return result_text.split(':')[0].strip().lower()
+                  
+        return None
+         
+
+    except Exception as e:
+        print(f"An unexpected error occurred during the loop: {e}")
+
+
+
+
 interpreter, face_cascade, input_details, output_details = load_resources()
 picam2 = initialize_picam2()
 

@@ -8,6 +8,7 @@ from picamera2 import Picamera2
 MODEL_PATH = 'media.tflite'
 EMOTION_LABELS = ['Happy', 'Smile']
 CONFIDENCE_THRESHOLD = 0.50 
+MIN_FACE_SIZE = 80
 
 # --- Model Initialization ---
 try:
@@ -36,7 +37,7 @@ try:
     picam2 = Picamera2()
     
     # Configure the camera for a fast preview stream
-    config = picam2.create_preview_configuration(main={"size": (640, 480)}) 
+    config = picam2.create_preview_configuration(main={"size": (1920, 1080)}) 
     picam2.configure(config)
     
     # FIX: The AfMode control has been removed as it causes errors on fixed-focus cameras (like IMX219)
@@ -54,8 +55,6 @@ while True:
     # Get a frame from the camera
     # capture_array() is the most efficient way to get a numpy array
     frame = picam2.capture_array() 
-    
-    # Convert from RGB (Picamera2 default) to BGR (OpenCV default)
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -70,6 +69,10 @@ while True:
 
     # --- Emotion Prediction ---
     for (x, y, w, h) in faces:
+        
+        if w < MIN_FACE_SIZE or h < MIN_FACE_SIZE:
+            continue
+        
         cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
         roi_gray = gray[y:y + h, x:x + w]
         
