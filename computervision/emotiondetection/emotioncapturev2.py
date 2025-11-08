@@ -78,6 +78,8 @@ while True:
             x, y, w, h = map(int, face_data[:4]) 
             
             cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+
+            print(f"facecoods {(x, y)},  {(x+w, y+h)}")
             
             x_end = min(x + w, frame_width)
             y_end = min(y + h, frame_height)

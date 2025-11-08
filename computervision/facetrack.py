@@ -28,12 +28,12 @@ while True:
     # 4. Convert the image to grayscale
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # 5. Detect faces (parameters are the same as your original code)
-    faces = face_cascade.detectMultiScale(
-    gray,
-    scaleFactor=1.1,
-    minNeighbors=4,
-    minSize=(100, 100)
+    # Detect faces in the grayscale image
+    faces = face_classifier.detectMultiScale(
+        gray_image,
+        scaleFactor=1.1, # How much the image size is reduced at each image scale
+        minNeighbors=5,  # How many neighbors each candidate rectangle should have
+        minSize=(40, 40) # Minimum face size to be considered a face
     )
 
     # 6. Draw a rectangle around the detected faces
