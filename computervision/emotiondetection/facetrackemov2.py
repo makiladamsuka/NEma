@@ -11,14 +11,9 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 import sys 
 
-# =================================================================
-# --- 1. CONFIGURATION PARAMETERS ---
-# =================================================================
-
-# Camera Settings
 FRAME_WIDTH, FRAME_HEIGHT = 640, 480 # Using 640x480 for better speed on the Pi
 
-# Servo Hardware Setup
+
 I2C_ADDRESS = 0x40
 PAN_CHANNEL = 1
 TILT_CHANNEL = 0
@@ -28,7 +23,7 @@ TILT_CENTER = 90
 PAN_Kp, PAN_Ki, PAN_Kd = 8/10, .001, 9/10
 TILT_Kp, TILT_Ki, TILT_Kd = 8/10, .001, 9/10
 
-SMOOTHING_FACTOR = 0.009
+SMOOTHING_FACTOR = 0.01
 PID_MAX_OFFSET = 60
 
 MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/media2.tflite'
@@ -80,7 +75,7 @@ try:
     current_pan_angle = PAN_CENTER
     current_tilt_angle = TILT_CENTER
 
-    print(f"PCA9685 initialized. Servos set to {PAN_CENTER}°, {TILT_CENTER}° tilt.")
+    print(f"PCA9685 initialized. Servos set to {PAN_CENTER}Â°, {TILT_CENTER}Â° tilt.")
 
 except ValueError:
     print("Error: Could not find PCA9685 at the specified I2C address.")
