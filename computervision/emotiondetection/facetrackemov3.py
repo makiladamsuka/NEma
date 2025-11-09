@@ -22,10 +22,10 @@ PAN_CENTER = 90
 TILT_CENTER = 90
 
 # PID Tuning (Your provided values)
-PAN_Kp, PAN_Ki, PAN_Kd = 1.5, .0001, 0.05
-TILT_Kp, TILT_Ki, TILT_Kd = 1.5, .0001, 0.05
+PAN_Kp, PAN_Ki, PAN_Kd = 3, .001, .5
+TILT_Kp, TILT_Ki, TILT_Kd = 3, .001, .5
 
-SMOOTHING_FACTOR = 0.0095
+SMOOTHING_FACTOR = .008
 PID_MAX_OFFSET = 60
 
 # Model Paths (Your provided paths)

@@ -1,7 +1,7 @@
 print("INITIALIZING DISPLAY")
 from oled.emodisplay import setup_and_start_display, display_emotion
 print("INITIALIZING DETECTION MODEL")
-from computervision.emotiondetection.emocapture import run_emotion_detector
+from computervision.emotiondetection.emocapturev2 import run_emotion_detector
 import time 
 
 print("**********SUCCESS******************")
@@ -13,6 +13,8 @@ setup_and_start_display()
 while True:
     emotion, face_coordinates = run_emotion_detector()
     print(f"Detected: {emotion} coordinates: {face_coordinates}")
+    
+    pidservo(face_coordinates)
     
     if emotion is not None:      
         print(f"-> Displaying **{emotion}**. Pausing detection...")

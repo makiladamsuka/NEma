@@ -1,5 +1,10 @@
-from emocapture import run_emotion_detector
+import cv2
+from emocapturev2 import run_emotion_detector
+
 
 while True:
-    print(run_emotion_detector())
+
+
+    emotion, coords = run_emotion_detector()
+    print(emotion, coords)
 
