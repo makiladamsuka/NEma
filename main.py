@@ -14,7 +14,6 @@ while True:
     emotion, face_coordinates = run_emotion_detector()
     print(f"Detected: {emotion} coordinates: {face_coordinates}")
     
-    pidservo(face_coordinates)
     
     if emotion is not None:      
         print(f"-> Displaying **{emotion}**. Pausing detection...")
