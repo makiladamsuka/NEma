@@ -43,9 +43,11 @@ last_face_x = FRAME_WIDTH / 2
 last_face_y = FRAME_HEIGHT / 2
 # Set a flag to easily check if we should be searching
 IS_SEARCHING = False 
-# How many times to use the last position before giving up and going to center
+was_face_detected = False
 MAX_SEARCH_FRAMES = 50
 search_frame_counter = 0
+
+SAD_TILT_OFFSET = 10
 
 
 
@@ -134,7 +136,6 @@ try:
     while True:
         frame = picam2.capture_array()
         
-        # *** IMPORTANT FIX: Convert RGB888 to BGR for OpenCV functions (e.g., drawing) ***
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         
         face_detector.setInputSize((FRAME_WIDTH, FRAME_HEIGHT)) 
@@ -146,25 +147,23 @@ try:
         emotion_text = "Searching..."
         emotion_color = (255, 255, 255)
         
-        # --- TRACKING LOGIC ---
+        
         if faces is not None:
-            IS_SEARCHING = False # Found the face, stop searching!
+            IS_SEARCHING = False
+            was_face_detected =True
             search_frame_counter = 0
 
-            # Get face coordinates and center
             (x, y, w, h) = map(int, faces[0][:4]) 
             face_center_x = x + w // 2
             face_center_y = y + h // 2
             
-            # --- Update Last Known Position ---
             last_face_x = face_center_x
             last_face_y = face_center_y
 
-            # PID Input is the current face center
             pan_offset = pan_pid(face_center_x)
             tilt_offset = tilt_pid(face_center_y)
             
-            # --- Emotion Detection (As before) ---
+        
             x_end = min(x + w, FRAME_WIDTH)
             y_end = min(y + h, FRAME_HEIGHT)
             x_start = max(0, x)
@@ -196,9 +195,9 @@ try:
                     emotion_color = (0, 255, 0)
                 else:
                     emotion_text = "Tracking..."
-                    emotion_color = (255, 255, 0) # Yellow for tracking
+                    emotion_color = (255, 255, 0) 
             
-            # Drawing for Face and Emotion
+
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
             cv2.circle(frame, (face_center_x, face_center_y), 5, (255, 0, 0), -1)
             cv2.putText(frame, emotion_text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, emotion_color, 2)
@@ -206,6 +205,13 @@ try:
                         
         else: # NO FACE DETECTED
             IS_SEARCHING = True
+            
+            
+            if was_face_detected:
+                display_emotion("sad") 
+                was_face_detected = False
+                
+                
             if search_frame_counter < MAX_SEARCH_FRAMES:
                 # Use the LAST KNOWN position as the PID input (Momentum)
                 pan_offset = pan_pid(last_face_x)

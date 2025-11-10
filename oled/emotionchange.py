@@ -12,7 +12,7 @@ import collections # <-- NEW IMPORT for simple queue management (optional, but c
 I2C_PORT = 1
 LEFT_OLED_ADDRESS = 0x3d
 RIGHT_OLED_ADDRESS = 0x3c 
-BASE_DIRECTORY = "videos"
+BASE_DIRECTORY = "/home/nema/Documents/NEma/oled/videos"
 DEFAULT_EMOTION = "idle" 
 
 ZOOM_FACTOR = 0.6
