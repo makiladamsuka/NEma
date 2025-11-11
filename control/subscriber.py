@@ -13,8 +13,21 @@ def on_connect(client, userdata, flags, rc):
 
 # This function runs every time a new message arrives
 def on_message(client, userdata, msg):
-    print(f"MESSAGE RECEIVED: '{msg.payload.decode('utf-8')}'")
+    ServoControllers = msg.payload.decode('utf-8')
+    print(f"MESSAGE RECEIVED: '{ServoControllers}'")
+    Servo_Axis_List = ServoControllers.split(",")
+    Servo_X1 = Servo_Axis_List[0]
+    Servo_Y1 = Servo_Axis_List[1]
+    Servo_X2 = Servo_Axis_List[2]
+    Servo_Y2 = Servo_Axis_List[3]
+    return_servo_values_for_face(Servo_X1, Servo_Y1)
+    return_servo_values_for_wheeel(Servo_X2, Servo_Y2)
 
+def return_servo_values_for_face(Servo_X1, Servo_Y1):
+    return Servo_X1, Servo_Y1
+
+def return_servo_values_for_wheeel(Servo_X2, Servo_Y2):
+    return Servo_X2, Servo_Y2
 
 # --- Setup ---
 client = mqtt.Client()
