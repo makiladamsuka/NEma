@@ -13,12 +13,16 @@ from signal import SIGINT, SIGTERM
 
 # --- Configuration ---
 # Adjust GPIO pins as needed
-PAN_SERVO_GPIO = 17  # Pan (left/right) servo
-TILT_SERVO_GPIO = 27 # Tilt (up/down) servo
+PAN_SERVO_GPIO = 0  # Pan (left/right) servo
+TILT_SERVO_GPIO = 1 # Tilt (up/down) servo
+
+#pan = 50 150 tilt 30 150
 
 # Servo min/max angles
-SERVO_MIN_ANGLE = -90
-SERVO_MAX_ANGLE = 90
+PAN_SERVO_MIN_ANGLE = 50
+PAN_SERVO_MAX_ANGLE = 150
+TILT_SERVO_MIN_ANGLE = 30
+TILT_SERVO_MAX_ANGLE = 150
 
 # Camera and Microphone (Linux device names)
 # Use 'ls /dev/video*' to find your camera
@@ -40,17 +44,17 @@ pc = RTCPeerConnection()
 try:
     pan_servo = AngularServo(
         PAN_SERVO_GPIO, 
-        min_angle=SERVO_MIN_ANGLE, 
-        max_angle=SERVO_MAX_ANGLE
+        min_angle=PAN_SERVO_MIN_ANGLE, 
+        max_angle=PAN_SERVO_MAX_ANGLE
     )
     tilt_servo = AngularServo(
         TILT_SERVO_GPIO, 
-        min_angle=SERVO_MIN_ANGLE, 
-        max_angle=SERVO_MAX_ANGLE
+        min_angle=TILT_SERVO_MIN_ANGLE, 
+        max_angle=TILT_SERVO_MAX_ANGLE
     )
     # Center servos on start
-    pan_servo.angle = 0
-    tilt_servo.angle = 0
+    pan_servo.angle = 90
+    tilt_servo.angle = 90
     logger.info("Servos connected and centered.")
 except Exception as e:
     logger.error(f"Failed to initialize servos. Is 'pigpiod' running?")
@@ -65,16 +69,16 @@ def move_servos(x, y):
     try:
         # Map X to Pan servo
         # (x / 127.0) gives a ratio from -1.0 to 1.0
-        pan_angle = (x / 127.0) * SERVO_MAX_ANGLE
+        pan_angle = (x / 254) * (PAN_SERVO_MAX_ANGLE - PAN_SERVO_MIN_ANGLE) + PAN_SERVO_MIN_ANGLE
         
         # Map Y to Tilt servo
         # (y / 127.0) gives a ratio from -1.0 to 1.0
         # Invert Y so "up" on joystick is "up" on head
-        tilt_angle = (y / 127.0) * SERVO_MAX_ANGLE
+        tilt_angle = (y / 254) * (TILT_SERVO_MAX_ANGLE - TILT_SERVO_MIN_ANGLE) + TILT_SERVO_MIN_ANGLE
         
         # Clamp values to be safe
-        pan_angle = max(SERVO_MIN_ANGLE, min(SERVO_MAX_ANGLE, pan_angle))
-        tilt_angle = max(SERVO_MIN_ANGLE, min(SERVO_MAX_ANGLE, tilt_angle))
+        pan_angle = max(PAN_SERVO_MIN_ANGLE, min(PAN_SERVO_MAX_ANGLE, pan_angle))
+        tilt_angle = max(TILT_SERVO_MIN_ANGLE, min(TILT_SERVO_MAX_ANGLE, tilt_angle))
 
         if pan_servo:
             pan_servo.angle = pan_angle
