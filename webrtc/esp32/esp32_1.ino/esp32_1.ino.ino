@@ -60,10 +60,10 @@ ControlData controllerInput;
 // Includes a "deadzone" to prevent drift when joystick is centered.
 int8_t mapJoystick(int value) {
   // Map 0-4095 to -127 to 127
-  int mapped = map(value, 0, 4095, -127, 127);
+  int mapped = map(value, 0, 4095, 0, 254);
   
   // Clamp to be safe
-  return constrain(mapped, -127, 127);
+  return constrain(mapped, 0, 254);
 }
 
 // Reads all inputs and updates the global 'controllerInput' struct
