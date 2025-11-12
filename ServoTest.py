@@ -1,7 +1,6 @@
 from adafruit_servokit import ServoKit
 import time
-
-FACE_CONTROL_SCRIPT = "home/nema/Documents/NEma/control/publisher.py"
+from control.subscriber import return_servo_values_for_face
 
 try:
     kit = ServoKit(channels=16) 

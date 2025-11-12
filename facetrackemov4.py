@@ -43,7 +43,7 @@ last_face_x = FRAME_WIDTH / 2
 last_face_y = FRAME_HEIGHT / 2
 # Set a flag to easily check if we should be searching
 IS_SEARCHING = False 
-was_face_detected = False
+was_idle= False
 MAX_SEARCH_FRAMES = 50
 search_frame_counter = 0
 
@@ -150,7 +150,6 @@ try:
         
         if faces is not None:
             IS_SEARCHING = False
-            was_face_detected =True
             search_frame_counter = 0
 
             (x, y, w, h) = map(int, faces[0][:4]) 
@@ -201,17 +200,13 @@ try:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
             cv2.circle(frame, (face_center_x, face_center_y), 5, (255, 0, 0), -1)
             cv2.putText(frame, emotion_text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, emotion_color, 2)
+            was_idle = True
 
                         
         else: # NO FACE DETECTED
             IS_SEARCHING = True
             
-            
-            if was_face_detected:
-                display_emotion("sad") 
-                was_face_detected = False
-                
-                
+
             if search_frame_counter < MAX_SEARCH_FRAMES:
                 # Use the LAST KNOWN position as the PID input (Momentum)
                 pan_offset = pan_pid(last_face_x)
@@ -225,11 +220,25 @@ try:
                 cv2.putText(frame, "LAST POS", (int(last_face_x) + 15, int(last_face_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
             else:
-                # Give up and go to center
+                if was_idle:
+                    display_emotion("sad") 
+                    was_idle = False
+                    tilt_offset = -SAD_TILT_OFFSET 
+                   
+                    target_pan_angle = PAN_CENTER + pan_offset  # 90 + 0 = 90
+                    target_tilt_angle = TILT_CENTER - tilt_offset # 90 - (-10) = 100
+                    
+
                 pan_offset = 0
-                tilt_offset = 0
                 emotion_text = "Idle"
                 emotion_color = (128, 128, 128) # Gray
+                
+                current_pan_angle = target_pan_angle
+                current_tilt_angle = target_tilt_angle
+ 
+
+                
+                
 
         # --- Servo Angle Calculation ---
         target_pan_angle = PAN_CENTER + pan_offset  

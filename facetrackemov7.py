@@ -1,4 +1,5 @@
-#Inplemented face loss find feature
+#Implement sad emotion and tilt down
+#improved returrn home
 
 
 import cv2
@@ -14,7 +15,10 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 import sys 
 
+from oled.emodisplay import setup_and_start_display, display_emotion
 
+
+setup_and_start_display() 
 FRAME_WIDTH, FRAME_HEIGHT = 640, 480 
 
 # Servo Hardware Setup
@@ -24,12 +28,17 @@ TILT_CHANNEL = 0
 PAN_CENTER = 90
 TILT_CENTER = 90
 
+TILT_CENTER = 90
+TILT_DOWN_ANGLE = 125 # Angle to look down when sad (e.g., 120 degrees)
+ 
+
+
 
 PAN_Kp, PAN_Ki, PAN_Kd =  4/10, .001, 9/10
 TILT_Kp, TILT_Ki, TILT_Kd = 4/10, .001, 9/10
 
 SMOOTHING_FACTOR = .008
-RETURN_SMOOTHING_FACTOR = 0.09 
+RETURN_SMOOTHING_FACTOR = 0.1
 PID_MAX_OFFSET = 60
 
 # Model Paths (Your provided paths)
@@ -49,6 +58,9 @@ IS_SEARCHING = False
 MAX_SEARCH_FRAMES = 50
 search_frame_counter = 0
 
+MAX_SEARCH_FRAMES = 50
+SAD_TILT_FRAMES = 150 # How many frames to stay in the "sad tilt" phase
+can_be_sad = False
 
 
 try:
@@ -155,6 +167,7 @@ try:
         # --- TRACKING LOGIC ---
         if faces is not None:
             IS_SEARCHING = False # Found the face, stop searching!
+            can_be_sad = True
             search_frame_counter = 0
 
             # Get face coordinates and center
@@ -199,6 +212,7 @@ try:
                     predicted_emotion = EMOTION_LABELS[max_index]
                     emotion_text = f"{predicted_emotion}: {max_confidence*100:.1f}%"
                     emotion_color = (0, 255, 0)
+                    display_emotion(predicted_emotion) 
                 else:
                     emotion_text = "Tracking..."
                     emotion_color = (255, 255, 0) # Yellow for tracking
@@ -210,26 +224,67 @@ try:
             
         else: # NO FACE DETECTED
             IS_SEARCHING = True
+            
+            # --- Always increment the counter when a face is not seen ---
+            search_frame_counter += 1
+
+            # --- Phase 1: Searching at Last Known Position ---
             if search_frame_counter < MAX_SEARCH_FRAMES:
-                # Use the LAST KNOWN position as the PID input (Momentum)
                 pan_offset = pan_pid(last_face_x)
                 tilt_offset = tilt_pid(last_face_y)
                 emotion_text = f"Searching ({search_frame_counter}/{MAX_SEARCH_FRAMES})"
-                emotion_color = (255, 0, 255) # Magenta for searching
-                search_frame_counter += 1
+                emotion_color = (255, 0, 255) # Magenta
                 
-                # Draw a target on the Last Known Position to visualize the search
+                # Draw a target on the Last Known Position
                 cv2.circle(frame, (int(last_face_x), int(last_face_y)), 10, (255, 0, 255), 2)
                 cv2.putText(frame, "LAST POS", (int(last_face_x) + 15, int(last_face_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
+            # --- Phase 2: NEW Sad Tilt Down ---
+            # This 'elif' block is the new phase
+            elif search_frame_counter < (MAX_SEARCH_FRAMES + SAD_TILT_FRAMES) and can_be_sad:
+                display_emotion("sad") 
+                emotion_color = (255, 100, 0) # Blue/Cyan for sad
+                
+                pan_offset = 0 
+                
+            
+                tilt_offset = TILT_CENTER - TILT_DOWN_ANGLE
+                can_be_sad = False
+                
+                while tilt_servo.angle < TILT_DOWN_ANGLE:
+                # --- Servo Angle Calculation ---
+                    target_pan_angle = PAN_CENTER + pan_offset  
+                    target_tilt_angle = TILT_CENTER - tilt_offset  
+
+                
+
+                    
+                    current_pan_angle = (target_pan_angle * RETURN_SMOOTHING_FACTOR) + (current_pan_angle * (1.0 - RETURN_SMOOTHING_FACTOR))
+                    current_tilt_angle = (target_tilt_angle * RETURN_SMOOTHING_FACTOR) + (current_tilt_angle * (1.0 - RETURN_SMOOTHING_FACTOR))
+                   
+                    current_pan_angle = max(0, min(180, current_pan_angle))
+                    current_tilt_angle = max(0, min(180, current_tilt_angle))
+
+                    # Move the Servos
+                    pan_servo.angle = current_pan_angle
+                    tilt_servo.angle = current_tilt_angle
+                    print(current_tilt_angle, TILT_DOWN_ANGLE)
+                    
+                    
+                    
+                time.sleep(5)
+                    
+                    
+                
+
+            # --- Phase 3: Give up and return to center ---
             else:
-                # Give up and go to center
                 pan_offset = 0
                 tilt_offset = 0
                 emotion_text = "Idle"
                 emotion_color = (128, 128, 128) # Gray
-
-    
+                can_be_sad = False
+                display_emotion("Idle")
     
     
         

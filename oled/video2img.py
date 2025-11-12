@@ -3,8 +3,8 @@ import os
 from PIL import Image
 
 # --- CONFIGURATION ---
-VIDEO_FILE = "/home/nema/Documents/NEma/oled/happy.mp4"   # <--- 💡 CHANGE THIS to your video file name
-OUTPUT_FOLDER = "smile"         # Folder where the small images will be saved
+VIDEO_FILE = "/home/nema/Documents/NEma/oled/idle.mp4"   # <--- 💡 CHANGE THIS to your video file name
+OUTPUT_FOLDER = "/home/nema/Documents/NEma/oled/idle2"         # Folder where the small images will be saved
 OLED_WIDTH = 128
 OLED_HEIGHT = 128
 FRAME_SKIP = 3                       # Only process every 3rd frame (adjust for speed/choppiness)

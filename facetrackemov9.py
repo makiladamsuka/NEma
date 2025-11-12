@@ -1,4 +1,4 @@
-#Inplemented face loss find feature
+#trying to do everything right
 
 
 import cv2
@@ -14,7 +14,10 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 import sys 
 
+from oled.emodisplay import setup_and_start_display, display_emotion
 
+
+setup_and_start_display() 
 FRAME_WIDTH, FRAME_HEIGHT = 640, 480 
 
 # Servo Hardware Setup
@@ -23,6 +26,11 @@ PAN_CHANNEL = 1
 TILT_CHANNEL = 0
 PAN_CENTER = 90
 TILT_CENTER = 90
+
+REQUIRED_EMOTION_FRAMES = 5  # How many frames to be "sure"
+CURRENT_EMOTION = "idle"     # What the robot is *currently* displaying
+CANDIDATE_EMOTION = "idle"   # What the robot *thinks* it sees
+EMOTION_COUNTER = 0
 
 
 PAN_Kp, PAN_Ki, PAN_Kd =  4/10, .001, 9/10
@@ -37,7 +45,9 @@ MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/media2.t
 YUNET_MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/face_detection_yunet_2023mar.onnx' 
 YUNET_INPUT_SIZE = (320, 320) 
 EMOTION_LABELS = ['Happy','Smile']
-CONFIDENCE_THRESHOLD = 0.50
+CONFIDENCE_THRESHOLD = 0.52
+HAS_DISPLAYED_SAD = False
+
 
 # --- NEW: Persistence Variables ---
 # Initialize the last known center of the face to the center of the frame
@@ -154,11 +164,31 @@ try:
         
         # --- TRACKING LOGIC ---
         if faces is not None:
+            
+            # --- NEW: Find the closest (largest) face ---
+            max_area = 0
+            closest_face = None
+
+            for face in faces:
+                # Get coords for *this* face in the loop
+                (x_i, y_i, w_i, h_i) = map(int, face[:4])
+                area = w_i * h_i
+                
+                # OPTIONAL: Draw a light green box around *every* face found
+                cv2.rectangle(frame, (x_i, y_i), (x_i + w_i, y_i + h_i), (0, 150, 0), 2) 
+
+                if area > max_area:
+                    max_area = area
+                    closest_face = (x_i, y_i, w_i, h_i)
+            # --- END NEW ---
+
+            # We found our target face, now proceed with all the original logic
             IS_SEARCHING = False # Found the face, stop searching!
+            HAS_DISPLAYED_SAD = False
             search_frame_counter = 0
 
-            # Get face coordinates and center
-            (x, y, w, h) = map(int, faces[0][:4]) 
+            # Get face coordinates and center *from the closest face*
+            (x, y, w, h) = closest_face
             face_center_x = x + w // 2
             face_center_y = y + h // 2
             
@@ -170,7 +200,7 @@ try:
             pan_offset = pan_pid(face_center_x)
             tilt_offset = tilt_pid(face_center_y)
             
-            # --- Emotion Detection (As before) ---
+            # --- Emotion Detection (This logic is unchanged) ---
             x_end = min(x + w, FRAME_WIDTH)
             y_end = min(y + h, FRAME_HEIGHT)
             x_start = max(0, x)
@@ -184,32 +214,57 @@ try:
                 input_data = resized_face.astype('float32') / 255.0
                 input_data = np.expand_dims(input_data, axis=0)
                 input_data = np.expand_dims(input_data, axis=-1)
-                
+                  
                 if input_data.shape != tuple(INPUT_SHAPE):
                     input_data = input_data.reshape(INPUT_SHAPE) 
 
                 interpreter.set_tensor(input_details[0]['index'], input_data)
                 interpreter.invoke()
                 predictions = interpreter.get_tensor(output_details[0]['index'])
-                
+                  
                 max_index = np.argmax(predictions[0])
                 max_confidence = predictions[0][max_index]
-                
+                                  
+                detected_emotion_this_frame = "idle" 
+                  
                 if max_confidence >= CONFIDENCE_THRESHOLD:
                     predicted_emotion = EMOTION_LABELS[max_index]
                     emotion_text = f"{predicted_emotion}: {max_confidence*100:.1f}%"
                     emotion_color = (0, 255, 0)
+                    detected_emotion_this_frame = predicted_emotion
                 else:
                     emotion_text = "Tracking..."
                     emotion_color = (255, 255, 0) # Yellow for tracking
-            
-            # Drawing for Face and Emotion
+                    detected_emotion_this_frame = "idle"
+                  
+                  
+                # --- "WAIT AND SEE" COUNTER (Unchanged) ---
+                if detected_emotion_this_frame == CANDIDATE_EMOTION:
+                    EMOTION_COUNTER += 1
+                else:
+                    EMOTION_COUNTER = 1
+                    CANDIDATE_EMOTION = detected_emotion_this_frame
+                        
+                if EMOTION_COUNTER >= REQUIRED_EMOTION_FRAMES and CANDIDATE_EMOTION != CURRENT_EMOTION:
+                    CURRENT_EMOTION = CANDIDATE_EMOTION
+                    if CURRENT_EMOTION != "idle":
+                        display_emotion(CURRENT_EMOTION)
+                                                      
+            # Drawing for *Target* Face and Emotion
+            # This will now draw over the light green box with the main blue tracking box
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
             cv2.circle(frame, (face_center_x, face_center_y), 5, (255, 0, 0), -1)
             cv2.putText(frame, emotion_text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, emotion_color, 2)
             
         else: # NO FACE DETECTED
             IS_SEARCHING = True
+            
+            display_emotion("looking")
+            
+            CURRENT_EMOTION = "idle"
+            CANDIDATE_EMOTION = "idle"
+            EMOTION_COUNTER = 0
+            
             if search_frame_counter < MAX_SEARCH_FRAMES:
                 # Use the LAST KNOWN position as the PID input (Momentum)
                 pan_offset = pan_pid(last_face_x)
@@ -223,11 +278,21 @@ try:
                 cv2.putText(frame, "LAST POS", (int(last_face_x) + 15, int(last_face_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
             else:
-                # Give up and go to center
+                if not HAS_DISPLAYED_SAD:
+                      display_emotion("sad") 
+                      pan_pid.reset()
+                      tilt_pid.reset()
+                      HAS_DISPLAYED_SAD = True 
+                  
                 pan_offset = 0
                 tilt_offset = 0
                 emotion_text = "Idle"
                 emotion_color = (128, 128, 128) # Gray
+                
+                
+                pan_pid.reset()
+                tilt_pid.reset()
+                
 
     
     

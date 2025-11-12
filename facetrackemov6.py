@@ -1,4 +1,4 @@
-#Inplemented face loss find feature
+#improved returrn home
 
 
 import cv2
@@ -14,7 +14,10 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 import sys 
 
+from oled.emodisplay import setup_and_start_display, display_emotion
 
+
+setup_and_start_display() 
 FRAME_WIDTH, FRAME_HEIGHT = 640, 480 
 
 # Servo Hardware Setup
@@ -38,6 +41,7 @@ YUNET_MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/fa
 YUNET_INPUT_SIZE = (320, 320) 
 EMOTION_LABELS = ['Happy','Smile']
 CONFIDENCE_THRESHOLD = 0.50
+
 
 # --- NEW: Persistence Variables ---
 # Initialize the last known center of the face to the center of the frame
@@ -199,6 +203,7 @@ try:
                     predicted_emotion = EMOTION_LABELS[max_index]
                     emotion_text = f"{predicted_emotion}: {max_confidence*100:.1f}%"
                     emotion_color = (0, 255, 0)
+                    display_emotion(predicted_emotion) 
                 else:
                     emotion_text = "Tracking..."
                     emotion_color = (255, 255, 0) # Yellow for tracking
@@ -223,11 +228,14 @@ try:
                 cv2.putText(frame, "LAST POS", (int(last_face_x) + 15, int(last_face_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
             else:
-                # Give up and go to center
+                display_emotion("sad") 
                 pan_offset = 0
                 tilt_offset = 0
                 emotion_text = "Idle"
                 emotion_color = (128, 128, 128) # Gray
+                pan_pid.reset()
+                tilt_pid.reset()
+                
 
     
     

@@ -1,4 +1,4 @@
-#Inplemented face loss find feature
+# trying to do everything right
 
 
 import cv2
@@ -14,7 +14,13 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 import sys 
 
+# --- NEW: Import the gesture module ---
+import head_gestures
 
+from oled.emodisplay import setup_and_start_display, display_emotion
+
+
+setup_and_start_display() 
 FRAME_WIDTH, FRAME_HEIGHT = 640, 480 
 
 # Servo Hardware Setup
@@ -24,9 +30,14 @@ TILT_CHANNEL = 0
 PAN_CENTER = 90
 TILT_CENTER = 90
 
+REQUIRED_EMOTION_FRAMES = 3  # How many frames to be "sure"
+CURRENT_EMOTION = "idle"     # What the robot is *currently* displaying
+CANDIDATE_EMOTION = "idle"   # What the robot *thinks* it sees
+EMOTION_COUNTER = 0
 
-PAN_Kp, PAN_Ki, PAN_Kd =  4/10, .001, 9/10
-TILT_Kp, TILT_Ki, TILT_Kd = 4/10, .001, 9/10
+
+PAN_Kp, PAN_Ki, PAN_Kd =  10, .001, 1
+TILT_Kp, TILT_Ki, TILT_Kd = 10, .001, 1
 
 SMOOTHING_FACTOR = .008
 RETURN_SMOOTHING_FACTOR = 0.09 
@@ -37,7 +48,9 @@ MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/media2.t
 YUNET_MODEL_PATH = '/home/nema/Documents/NEma/computervision/emotiondetection/face_detection_yunet_2023mar.onnx' 
 YUNET_INPUT_SIZE = (320, 320) 
 EMOTION_LABELS = ['Happy','Smile']
-CONFIDENCE_THRESHOLD = 0.50
+CONFIDENCE_THRESHOLD = 0.52
+HAS_DISPLAYED_SAD = False
+
 
 # --- NEW: Persistence Variables ---
 # Initialize the last known center of the face to the center of the frame
@@ -151,26 +164,59 @@ try:
         target_tilt_angle = TILT_CENTER
         emotion_text = "Searching..."
         emotion_color = (255, 255, 255)
-        
-        # --- TRACKING LOGIC ---
+
         if faces is not None:
-            IS_SEARCHING = False # Found the face, stop searching!
+            max_area = 0
+            closest_face_coords = None # (x, y, w, h)
+            
+            total_x = 0
+            total_y = 0
+            num_faces = len(faces)
+
+            for face in faces:
+                (x_i, y_i, w_i, h_i) = map(int, face[:4])
+                area = w_i * h_i
+                
+                # 1. Accumulate totals for the group center
+                total_x += (x_i + w_i // 2)
+                total_y += (y_i + h_i // 2)
+                
+                # 2. Find the closest face (for emotion focus)
+                if area > max_area:
+                    max_area = area
+                    closest_face_coords = (x_i, y_i, w_i, h_i)
+                
+                # Draw a light green box around *every* face found
+                cv2.rectangle(frame, (x_i, y_i), (x_i + w_i, y_i + h_i), (0, 150, 0), 2) 
+
+
+            # --- NEW: Calculate the two different targets ---
+            
+            # Target 1: The PID target (where to look)
+            # This is the average center of the group
+            group_center_x = total_x / num_faces
+            group_center_y = total_y / num_faces
+            
+            # Target 2: The Emotion/Drawing target (who to focus on)
+            # These are the coords of the closest face
+            (x, y, w, h) = closest_face_coords
+            
+            # --- END NEW CALCS ---
+
+            # We found faces, so proceed with all original logic
+            IS_SEARCHING = False 
+            HAS_DISPLAYED_SAD = False
             search_frame_counter = 0
 
-            # Get face coordinates and center
-            (x, y, w, h) = map(int, faces[0][:4]) 
-            face_center_x = x + w // 2
-            face_center_y = y + h // 2
-            
-            # --- Update Last Known Position ---
-            last_face_x = face_center_x
-            last_face_y = face_center_y
+            # --- Update Last Known Position (of the GROUP) ---
+            last_face_x = group_center_x
+            last_face_y = group_center_y
 
-            # PID Input is the current face center
-            pan_offset = pan_pid(face_center_x)
-            tilt_offset = tilt_pid(face_center_y)
+            # PID Input is now the GROUP CENTER
+            pan_offset = pan_pid(group_center_x)
+            tilt_offset = tilt_pid(group_center_y)
             
-            # --- Emotion Detection (As before) ---
+            # --- Emotion Detection (uses 'x, y, w, h' from CLOSEST face) ---
             x_end = min(x + w, FRAME_WIDTH)
             y_end = min(y + h, FRAME_HEIGHT)
             x_start = max(0, x)
@@ -179,37 +225,111 @@ try:
             roi_color = frame[y_start:y_end, x_start:x_end]
             
             if roi_color.size > 0:
+                # ... (The entire emotion detection and filtering logic remains EXACTLY the same) ...
                 roi_gray = cv2.cvtColor(roi_color, cv2.COLOR_BGR2GRAY)
                 resized_face = cv2.resize(roi_gray, (TFLITE_INPUT_W, TFLITE_INPUT_H), interpolation=cv2.INTER_AREA)
                 input_data = resized_face.astype('float32') / 255.0
                 input_data = np.expand_dims(input_data, axis=0)
                 input_data = np.expand_dims(input_data, axis=-1)
-                
+                    
                 if input_data.shape != tuple(INPUT_SHAPE):
                     input_data = input_data.reshape(INPUT_SHAPE) 
 
                 interpreter.set_tensor(input_details[0]['index'], input_data)
                 interpreter.invoke()
                 predictions = interpreter.get_tensor(output_details[0]['index'])
-                
+                    
                 max_index = np.argmax(predictions[0])
                 max_confidence = predictions[0][max_index]
-                
+                    
+                detected_emotion_this_frame = "idle" 
+                    
                 if max_confidence >= CONFIDENCE_THRESHOLD:
                     predicted_emotion = EMOTION_LABELS[max_index]
                     emotion_text = f"{predicted_emotion}: {max_confidence*100:.1f}%"
                     emotion_color = (0, 255, 0)
+                    detected_emotion_this_frame = predicted_emotion
                 else:
                     emotion_text = "Tracking..."
                     emotion_color = (255, 255, 0) # Yellow for tracking
-            
-            # Drawing for Face and Emotion
+                    detected_emotion_this_frame = "idle"
+                
+                
+                # --- "WAIT AND SEE" COUNTER (Unchanged) ---
+                if detected_emotion_this_frame == CANDIDATE_EMOTION:
+                    EMOTION_COUNTER += 1
+                else:
+                    EMOTION_COUNTER = 1
+                    CANDIDATE_EMOTION = detected_emotion_this_frame
+                        
+                # --- NEW GESTURE LOGIC ---
+                if EMOTION_COUNTER >= REQUIRED_EMOTION_FRAMES and CANDIDATE_EMOTION != CURRENT_EMOTION:
+                    # 1. We have a confirmed new emotion!
+                    CURRENT_EMOTION = CANDIDATE_EMOTION
+                    
+                    if CURRENT_EMOTION != "idle":
+                        
+                        # 2. Update the OLED display first
+                        
+                        # 3. Decide if this emotion triggers a gesture
+                        gesture_to_perform = None
+                        if CURRENT_EMOTION == "Happy" or CURRENT_EMOTION == "Smile":
+                            gesture_to_perform = "happy_shake"
+                            display_emotion(CURRENT_EMOTION)
+                            
+                        # --- You can add more gestures here ---
+                        # elif CURRENT_EMOTION == "Sad":
+                        #    gesture_to_perform = "sad_droop"
+                        # elif CURRENT_EMOTION == "Surprise":
+                        #    gesture_to_perform = "happy_nod" # (example)
+
+                        # 4. If we have a gesture, perform it
+                        if gesture_to_perform:
+                            print(f"--- Emotive Gesture Triggered: {gesture_to_perform} ---")
+                            
+                            # We MUST reset the PID controllers.
+                            # While the gesture runs, the face will move,
+                            # and we don't want the PID building up huge error.
+                            pan_pid.reset()
+                            tilt_pid.reset()
+                            
+                            # Call the new gesture function. It will PAUSE this loop
+                            # until the gesture is finished.
+                            new_pan, new_tilt = head_gestures.perform_gesture(
+                                gesture_to_perform,
+                                pan_servo,
+                                tilt_servo,
+                                current_pan_angle,
+                                current_tilt_angle
+                            )
+                            
+                            # IMPORTANT: Update our main loop's "current" angles
+                            # to match where the gesture left the head.
+                            current_pan_angle = new_pan
+                            current_tilt_angle = new_tilt
+                            print(f"--- Gesture Complete. Resuming PID tracking. ---")
+                                         
+            # --- Drawing for Face and Emotion ---
+            # Draw the BLUE box on the CLOSEST face
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            cv2.circle(frame, (face_center_x, face_center_y), 5, (255, 0, 0), -1)
+            
+            # Draw the emotion text on the CLOSEST face
             cv2.putText(frame, emotion_text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, emotion_color, 2)
+
+            # --- NEW: Draw the GROUP center ---
+            # Draw a magenta circle where the robot is actually "looking"
+            cv2.circle(frame, (int(group_center_x), int(group_center_y)), 7, (255, 0, 255), -1)
+            cv2.putText(frame, "GROUP CENTER", (int(group_center_x) + 10, int(group_center_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
             
         else: # NO FACE DETECTED
             IS_SEARCHING = True
+            
+            display_emotion("looking")
+            
+            CURRENT_EMOTION = "idle"
+            CANDIDATE_EMOTION = "idle"
+            EMOTION_COUNTER = 0
+            
             if search_frame_counter < MAX_SEARCH_FRAMES:
                 # Use the LAST KNOWN position as the PID input (Momentum)
                 pan_offset = pan_pid(last_face_x)
@@ -223,15 +343,41 @@ try:
                 cv2.putText(frame, "LAST POS", (int(last_face_x) + 15, int(last_face_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
 
             else:
-                # Give up and go to center
-                pan_offset = 0
-                tilt_offset = 0
-                emotion_text = "Idle"
-                emotion_color = (128, 128, 128) # Gray
+                if not HAS_DISPLAYED_SAD:
+                        # --- FIRST "GIVE UP" FRAME ---
+                        # Display "sad" and command the servos to *freeze*
+                        # by setting their target to their current position.
+                        display_emotion("sad") 
+                        pan_pid.reset()
+                        tilt_pid.reset()
+                        HAS_DISPLAYED_SAD = True 
+                        
+                        # --- FREEZE MOTION ---
+                        # Calculate the offsets that will result in a target
+                        # angle equal to the *current* angle.
+                        pan_offset = current_pan_angle - PAN_CENTER
+                        tilt_offset = TILT_CENTER - current_tilt_angle
+                        
+                        emotion_text = "Sad..."
+                        emotion_color = (0, 0, 255) # Red for sad
+                    
+                else:
+                    # --- SUBSEQUENT "GIVE UP" FRAMES ---
+                    # We have already shown sad, now move to the center.
+                    pan_offset = 0
+                    tilt_offset = 0
+                    emotion_text = "Idle"
+                    emotion_color = (128, 128, 128) # Gray
+                        
+                    # Keep PIDs reset
+                    pan_pid.reset()
+                    tilt_pid.reset()
+                
 
-    
-    
-    
+        
+        
+        
+        
         
         
         # --- Servo Angle Calculation ---
@@ -258,6 +404,7 @@ try:
         # Move the Servos
         pan_servo.angle = current_pan_angle
         tilt_servo.angle = current_tilt_angle
+        
         
         
         
