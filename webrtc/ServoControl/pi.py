@@ -3,29 +3,20 @@ import json
 import logging
 import sys
 import os
-
+from adafruit_servokit import ServoKit
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
-# Removed: from aiortc.contrib.media import MediaPlayer
-# Use gpiozero for servos. Make sure 'pigpiod' is running!
-# (sudo systemctl start pigpiod)
-from gpiozero import AngularServo
 from signal import SIGINT, SIGTERM
 
 # --- Configuration ---
-# Adjust GPIO pins as needed
-PAN_SERVO_GPIO = 0  # Pan (left/right) servo
-TILT_SERVO_GPIO = 1 # Tilt (up/down) servo
+# PCA9685 Channel Indices (0-15)
+PAN_SERVO_GPIO = 0  # Pan (left/right) servo, connected to channel 0
+TILT_SERVO_GPIO = 1 # Tilt (up/down) servo, connected to channel 1
 
-# Servo min/max angles
+# Servo min/max angles (Used for mapping joystick input)
 PAN_SERVO_MIN_ANGLE = 50
 PAN_SERVO_MAX_ANGLE = 150
 TILT_SERVO_MIN_ANGLE = 30
 TILT_SERVO_MAX_ANGLE = 150
-
-# Removed Camera and Microphone Configuration
-# PI_CAMERA = "/dev/video0" 
-# PI_MICROPHONE = "hw:1,0" 
-
 # --- End Configuration ---
 
 
@@ -35,55 +26,66 @@ logger = logging.getLogger("robot_pi")
 
 # Global PeerConnection
 pc = RTCPeerConnection()
+servos_enabled = False
 
-# --- Servo Setup ---
+# --- Servo Setup (PCA9685/ServoKit) ---
 try:
-    pan_servo = AngularServo(
-        PAN_SERVO_GPIO, 
-        min_angle=PAN_SERVO_MIN_ANGLE, 
-        max_angle=PAN_SERVO_MAX_ANGLE
-    )
-    tilt_servo = AngularServo(
-        TILT_SERVO_GPIO, 
-        min_angle=TILT_SERVO_MIN_ANGLE, 
-        max_angle=TILT_SERVO_MAX_ANGLE
-    )
+    # Initialize ServoKit for the PCA9685 (16 channels)
+    kit = ServoKit(channels=16) 
+    
+    # Apply pulse width ranges for better control (if needed for your specific servos)
+    kit.servo[PAN_SERVO_GPIO].set_pulse_width_range(min_pulse=450, max_pulse=2600)
+    kit.servo[TILT_SERVO_GPIO].set_pulse_width_range(min_pulse=450, max_pulse=2600)
+    
     # Center servos on start
-    pan_servo.angle = 90
-    tilt_servo.angle = 90
-    logger.info("Servos connected and centered.")
-except Exception as e:
-    logger.error(f"Failed to initialize servos. Is 'pigpiod' running?")
-    logger.error(f"Error: {e}")
+    kit.servo[PAN_SERVO_GPIO].angle = 90
+    kit.servo[TILT_SERVO_GPIO].angle = 90
+    servos_enabled = True
+    logger.info("Servos connected and centered using ServoKit.")
+    
+except ValueError:
+    # This exception typically catches I2C initialization failure
+    logger.error("ERROR: Could not initialize ServoKit. Check I2C wiring and external power.")
     logger.error("Running in 'simulation' mode. Servos will not move.")
-    pan_servo = None
-    tilt_servo = None
+    kit = None
+    servos_enabled = False
+except Exception as e:
+    logger.error(f"An unexpected error occurred during ServoKit initialization: {e}")
+    kit = None
+    servos_enabled = False
 
 
 def move_servos(x, y):
-    """Maps joystick data (-127 to 127) to servo angles."""
+    """Maps joystick data (-127 to 127) to servo angles using ServoKit.
+    NOTE: The current mapping logic (user-requested) will map (x=0, y=0) to MIN_ANGLE, not the center angle.
+    If you want (x=0, y=0) to map to 90 degrees, you should use (x + 127) / 254.0 as the normalized value.
+    """
+    if not servos_enabled:
+        return
+
     try:
+        # --- START USER'S REQUESTED MAPPING LOGIC ---
         # Map X to Pan servo
         # (x / 254) * (max - min) + min
-        pan_angle = (x / 254) * (PAN_SERVO_MAX_ANGLE - PAN_SERVO_MIN_ANGLE) + PAN_SERVO_MIN_ANGLE
+        pan_angle = ((x / 254.0)+1) * (PAN_SERVO_MAX_ANGLE - PAN_SERVO_MIN_ANGLE) + PAN_SERVO_MIN_ANGLE
         
         # Map Y to Tilt servo
-        # Invert Y so "up" on joystick is "up" on head
-        tilt_angle = (y / 254) * (TILT_SERVO_MAX_ANGLE - TILT_SERVO_MIN_ANGLE) + TILT_SERVO_MIN_ANGLE
+        # (y / 254) * (max - min) + min
+        tilt_angle = ((y / 254.0)+1) * (TILT_SERVO_MAX_ANGLE - TILT_SERVO_MIN_ANGLE) + TILT_SERVO_MIN_ANGLE
+        # --- END USER'S REQUESTED MAPPING LOGIC ---
         
         # Clamp values to be safe
         pan_angle = max(PAN_SERVO_MIN_ANGLE, min(PAN_SERVO_MAX_ANGLE, pan_angle))
         tilt_angle = max(TILT_SERVO_MIN_ANGLE, min(TILT_SERVO_MAX_ANGLE, tilt_angle))
 
-        if pan_servo:
-            pan_servo.angle = pan_angle
-        if tilt_servo:
-            tilt_servo.angle = tilt_angle
+        # Control Servos using ServoKit
+        kit.servo[PAN_SERVO_GPIO].angle = pan_angle
+        kit.servo[TILT_SERVO_GPIO].angle = tilt_angle
             
         logger.info(f"Servos -> Pan: {pan_angle:.1f}°, Tilt: {tilt_angle:.1f}°")
 
     except Exception as e:
-        logger.error(f"Error moving servos: {e}")
+        logger.error(f"Error moving servos via ServoKit: {e}")
 
 
 # --- WebRTC Event Handlers ---
@@ -102,14 +104,13 @@ def on_datachannel(channel):
         try:
             data = json.loads(message)
             
-            # --- THIS IS THE UPDATED LOGIC (Unchanged) ---
             # Get the 'j1' object (joystick 1) for pan/tilt
             j1_data = data.get('j1', {})
             x = j1_data.get('x', 0)
             y = j1_data.get('y', 0)
             
             # You can also get other data if needed
-            j2_data = data.get('j2', {})
+            # j2_data = data.get('j2', {})
             switches = data.get('sw', 0)
 
             logger.info(f"Received: J1_X={x}, J1_Y={y}, SW={switches}")
@@ -117,19 +118,12 @@ def on_datachannel(channel):
             # This is where we control the robot!
             move_servos(x, y)
             
-            # Example: Use switch 1 (bit 0) for something
-            # if (switches & (1 << 0)):
-            #    logger.info("Switch 1 is PRESSED!")
-            
         except Exception as e:
             logger.warning(f"Error processing message: {e}")
             logger.warning(f"Raw message: {message}")
 
 @pc.on("track")
 def on_track(track):
-    # This handler is kept but no longer logs anything or processes tracks, 
-    # as the Pi will not be sending any. This is just for completeness 
-    # if the web app still sends tracks, but is not essential.
     logger.info(f"Receiving {track.kind} track from web app (Ignoring)")
 
 @pc.on("icecandidate")
@@ -152,7 +146,6 @@ async def run_signaling():
     """Handles the manual copy-paste signaling."""
     loop = asyncio.get_running_loop()
     
-    # 1. Removed: Add Pi's Camera and Mic tracks
     logger.info("No camera or microphone tracks are being streamed.")
 
     
@@ -220,12 +213,11 @@ if __name__ == "__main__":
         loop.run_until_complete(run_signaling())
     finally:
         logger.info("Cleaning up...")
-        # Clean up servos on exit
-        if pan_servo:
-            pan_servo.angle = 0 
-            pan_servo.close()
-        if tilt_servo:
-            tilt_servo.angle = 0
-            tilt_servo.close()
+        # Center servos on exit if enabled
+        if servos_enabled:
+            # Setting angle to 90 to ensure servos are in a neutral position
+            kit.servo[PAN_SERVO_GPIO].angle = 90
+            kit.servo[TILT_SERVO_GPIO].angle = 90
+            
         loop.close()
         logger.info("Shutdown complete.")
