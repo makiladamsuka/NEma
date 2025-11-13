@@ -26,12 +26,20 @@ output_details = interpreter.get_output_details()
 INPUT_SHAPE = input_details[0]['shape'] 
 
 try:
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
     # Confidence threshold of 0.7
+=======
+    # *** MODIFIED: Lowered confidence from 0.9 to 0.7 ***
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
     face_detector = cv2.FaceDetectorYN.create(
         YUNET_MODEL_PATH, 
         "", 
         YUNET_INPUT_SIZE, 
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
         0.7, # Good confidence value
+=======
+        0.7, # Lowered threshold to improve detection
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
         0.3, 
         5000 
     )
@@ -46,9 +54,15 @@ except Exception as e:
 print("Initializing PiCamera2...")
 picam2 = Picamera2()
 
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
 # *** MODIFIED: Explicitly request 4-channel XRGB8888 format ***
 config = picam2.create_preview_configuration(
     main={"size": (640, 480), "format": "XRGB8888"}
+=======
+# *** MODIFIED: Request standard RGB888 format ***
+config = picam2.create_preview_configuration(
+    main={"size": (640, 480), "format": "RGB888"}
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
 )
 picam2.configure(config)
 
@@ -59,6 +73,7 @@ time.sleep(1.0)
 print("Starting detection loop...")
 
 while True:
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
     # Capture a frame from Picamera2 (it's in 4-channel RGBA format)
     frame = picam2.capture_array()
     
@@ -66,17 +81,34 @@ while True:
     frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
 
     # Now 'frame' is in the 3-channel BGR format that all cv2 functions expect.
+=======
+    # Capture a frame from Picamera2 (it's in RGB format)
+    frame = picam2.capture_array()
+    
+    # *** NEW FIX: Convert the RGB frame to BGR for OpenCV ***
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+    # Now 'frame' is in the BGR format that all cv2 functions expect.
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
     
     frame_height, frame_width, _ = frame.shape
     face_detector.setInputSize((frame_width, frame_height)) 
     
     # --- YuNet Face Detection ---
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
+=======
+    # We pass the BGR frame to the detector
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
     success, faces = face_detector.detect(frame)
     
     if faces is not None:
         for face_data in faces:
             x, y, w, h = map(int, face_data[:4]) 
             
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
+=======
+            # Draw rectangle on the BGR frame
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
             cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
             print(f"facecoods {(x, y)},  {(x+w, y+h)}")
@@ -86,12 +118,17 @@ while True:
             x_start = max(0, x)
             y_start = max(0, y)
 
+            # Crop from the BGR frame
             roi_color = frame[y_start:y_end, x_start:x_end]
             
             if roi_color.size == 0:
                 continue 
             
             # Convert the BGR crop to Grayscale
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
+=======
+            # This line is now correct, as it expects a BGR input
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
             roi_gray = cv2.cvtColor(roi_color, cv2.COLOR_BGR2GRAY)
             
             # --- Pre-process the face for the emotion model ---
@@ -120,6 +157,10 @@ while True:
                 confidence_text = "Uncertain" 
                 color = (255, 255, 255) # White
                 
+<<<<<<< Updated upstream:computervision/emotiondetection/emotioncapturev2.py
+=======
+            # Display text on the BGR frame
+>>>>>>> Stashed changes:computervision/emotiondetection/emotiondetectionpi.py
             cv2.putText(frame, confidence_text, (x, y - 10), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 

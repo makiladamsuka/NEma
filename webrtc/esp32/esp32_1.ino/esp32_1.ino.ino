@@ -36,11 +36,6 @@
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-// Global BLE Characteristic
-BLECharacteristic *pCharacteristic;
-bool deviceConnected = false;
-ControlData lastControllerInput; // To send data only on change
-
 // Data structure to hold all control data
 // JOYSTICK AXES ARE NOW uint8_t (0 to 255)
 struct ControlData {
@@ -50,6 +45,11 @@ struct ControlData {
   uint8_t joy2_y; // 0 (min) to 255 (max)
   uint8_t switches; // 1 byte, 8 bits for 8 switches
 };
+// Global BLE Characteristic
+BLECharacteristic *pCharacteristic;
+bool deviceConnected = false;
+ControlData lastControllerInput; // To send data only on change
+
 
 ControlData controllerInput;
 
