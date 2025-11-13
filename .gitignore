@@ -20,6 +20,7 @@ env/
 *.gif
 *.bmp
 *.tiff
+*.json
 
 # Video formats
 *.mp4
