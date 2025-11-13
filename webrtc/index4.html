@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Robot Head Controller</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Ensure the page is not zoomable and fits the screen */
+        body, html {
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom style for video elements */
+        video {
+            width: 100%;
+            background: #222;
+            border-radius: 0.5rem;
+            transform: scaleX(-1); /* Mirror local video */
+        }
+        #remoteVideo {
+            transform: scaleX(1); /* Don't mirror remote video */
+        }
+    </style>
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 h-full flex flex-col p-4 md:p-8 gap-4 overflow-hidden">
+    <h1 class="text-3xl font-bold text-center">Robot Head Telepresence (Automated Signaling)</h1>
+
+    <div class="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
+        
+        <div class="flex-1 flex flex-col gap-4 overflow-hidden">
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow flex-1 flex flex-col">
+                <h2 class="text-xl font-semibold mb-2">Robot View</h2>
+                <div class="aspect-video w-full rounded-lg bg-gray-700 flex-1">
+                    <video id="remoteVideo" autoplay playsinline></video>
+                </div>
+            </div>
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow flex-1 flex flex-col">
+                <h2 class="text-xl font-semibold mb-2">Your View</h2>
+                <div class="aspect-video w-full rounded-lg bg-gray-700 flex-1">
+                    <video id="localVideo" autoplay muted playsinline></video>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-1 flex flex-col gap-4 overflow-y-auto">
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">1. Controller (ESP32)</h3>
+                <button id="connectBluetooth" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                    Connect to Controller (Bluetooth)
+                </button>
+                <div class="mt-2 p-2 h-32 bg-gray-200 dark:bg-gray-700 rounded overflow-auto">
+                    <pre id="controllerData" class="text-sm">Waiting for controller...</pre>
+                </div>
+            </div>
+            
+            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+                <h3 class="text-lg font-semibold mb-2">2. Robot (Raspberry Pi)</h3>
+                <button id="connectWebRTC" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 hidden">
+                    Start Robot Connection (WebRTC)
+                </button>
+                <div id="webRtcStatus" class="mt-2 text-center text-sm">WebRTC Inactive (Connect Bluetooth and press Switch 1)</div>
+            </div>
+
+            </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const controllerDataEl = document.getElementById('controllerData');
+        const webRtcStatusEl = document.getElementById('webRtcStatus');
+        const localVideoEl = document.getElementById('localVideo');
+        const remoteVideoEl = document.getElementById('remoteVideo');
+
+        // --- GLOBAL CONFIGURATION ---
+        // REPLACE [YOUR_PI_IP_ADDRESS] with the actual IP address of your Raspberry Pi
+        const ROBOT_SIGNALING_URL = "ws://[YOUR_PI_IP_ADDRESS]:8765"; 
+        
+        // WebRTC Globals
+        let peerConnection;
+        let dataChannel;
+        let localStream;
+        let signalingSocket;
+        let isWebRTCStarting = false; // Flag to prevent multiple starts
+        
+        const iceConfiguration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }, // Google's public STUN server
+            ]
+        };
+
+        // --- 1. Bluetooth Controller Logic ---
+        document.getElementById('connectBluetooth').addEventListener('click', async () => {
+            controllerDataEl.textContent = 'Scanning for devices...';
+
+            // --- UUIDs MUST match your ESP32 code ---
+            const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+            const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+            try {
+                // Filter for *only* your controller's service
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SERVICE_UUID] }]
+                });
+
+                controllerDataEl.textContent = `Connecting to ${device.name}...`;
+                const server = await device.gatt.connect();
+
+                controllerDataEl.textContent = 'Getting service...';
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                
+                controllerDataEl.textContent = 'Getting characteristic...';
+                const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+                controllerDataEl.textContent = 'Starting notifications...';
+                await characteristic.startNotifications();
+                
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    const value = event.target.value; // This is a DataView
+                    
+                    // --- Parse your ESP32 data struct ---
+                    if (value.byteLength < 5) return; // Not our data packet
+
+                    const joy1_x = value.getInt8(0);
+                    const joy1_y = value.getInt8(1);
+                    const joy2_x = value.getInt8(2);
+                    const joy2_y = value.getInt8(3);
+                    const switches = value.getUint8(4);
+
+                    // 1. --- CONNECTION TRIGGER LOGIC (Switch 1) ---
+                    // Check if Switch 1 (bit 0) is pressed AND WebRTC hasn't started
+                    const isSwitch1Pressed = (switches & 0x01) > 0;
+
+                    if (isSwitch1Pressed && !isWebRTCStarting) {
+                        isWebRTCStarting = true; // Set flag to prevent multiple starts
+                        webRtcStatusEl.textContent = 'Switch detected! Starting WebRTC connection...';
+                        
+                        // Programmatically click the hidden WebRTC button
+                        document.getElementById('connectWebRTC').click();
+                    }
+                    // ------------------------------------
+
+                    // Display the data
+                    const dataString = `Joy1 X: ${joy1_x}\nJoy1 Y: ${joy1_y}\nJoy2 X: ${joy2_x}\nJoy2 Y: ${joy2_y}\nSW: ${switches}`;
+                    controllerDataEl.textContent = dataString;
+
+                    // Create the JSON object to send to the robot
+                    const controlPacket = {
+                        j1: { x: joy1_x, y: joy1_y },
+                        j2: { x: joy2_x, y: joy2_y },
+                        sw: switches
+                    };
+
+                    // 2. --- Send data over WebRTC Data Channel ---
+                    if (dataChannel && dataChannel.readyState === 'open') {
+                       // Send the full control packet as a JSON string
+                       dataChannel.send(JSON.stringify(controlPacket));
+                    }
+                });
+
+            } catch (error) {
+                console.error('Bluetooth Error:', error);
+                controllerDataEl.textContent = `Error: ${error.message}`;
+            }
+        });
+
+        // --- 2. WebRTC Connection Logic (WebSocket Automated) ---
+        document.getElementById('connectWebRTC').addEventListener('click', async () => {
+            webRtcStatusEl.textContent = 'Connecting to signaling server...';
+
+            try {
+                // 1. Establish WebSocket connection to the Pi
+                signalingSocket = new WebSocket(ROBOT_SIGNALING_URL);
+
+                signalingSocket.onopen = async () => {
+                    webRtcStatusEl.textContent = 'Signaling connected. Starting WebRTC...';
+                    
+                    // Get local camera and microphone
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    localVideoEl.srcObject = localStream;
+
+                    peerConnection = new RTCPeerConnection(iceConfiguration);
+
+                    // Add local tracks to the connection
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+
+                    // Handle incoming remote stream
+                    peerConnection.ontrack = (event) => {
+                        webRtcStatusEl.textContent = 'Receiving remote stream!';
+                        if (!remoteVideoEl.srcObject) {
+                            remoteVideoEl.srcObject = event.streams[0];
+                        }
+                    };
+
+                    // Create the Data Channel (for controls)
+                    dataChannel = peerConnection.createDataChannel('controls', { ordered: false, maxRetransmits: 0 });
+                    dataChannel.onopen = () => webRtcStatusEl.textContent = 'Data channel OPEN';
+                    dataChannel.onclose = () => webRtcStatusEl.textContent = 'Data channel CLOSED';
+                    dataChannel.onerror = (err) => console.error('Data channel error:', err);
+
+                    // Handle ICE candidates: SEND THEM VIA WEBSOCKET
+                    peerConnection.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            // Send the candidate as a JSON string to the signaling server
+                            signalingSocket.send(JSON.stringify(event.candidate.toJSON()));
+                        }
+                    };
+                    
+                    // Handle incoming messages from the signaling server (The Robot's Answer/ICEs)
+                    signalingSocket.onmessage = async (event) => {
+                        const message = JSON.parse(event.data);
+                        
+                        if (message.type === 'answer') {
+                            // Set the Answer
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(message));
+                            webRtcStatusEl.textContent = 'Robot Answer set! Connection pending...';
+                        } else if (message.candidate) {
+                            // Add the Robot's ICE candidate
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(message));
+                            webRtcStatusEl.textContent = 'Added Robot ICE candidate.';
+                        }
+                    };
+
+                    // Create SDP Offer
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+
+                    // SEND THE OFFER VIA WEBSOCKET
+                    signalingSocket.send(JSON.stringify(peerConnection.localDescription));
+                    webRtcStatusEl.textContent = 'Offer sent to robot.';
+                };
+
+                signalingSocket.onerror = (error) => {
+                    webRtcStatusEl.textContent = `Signaling Error: Could not connect to robot.`;
+                    console.error('WebSocket Error:', error);
+                }
+
+            } catch (error) {
+                console.error('WebRTC/Media Error:', error);
+                webRtcStatusEl.textContent = `Error: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>
