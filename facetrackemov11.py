@@ -14,7 +14,7 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 import sys 
 
-# --- NEW: Import the gesture module ---
+
 import head_gestures
 
 from oled.emodisplay import setup_and_start_display, display_emotion
@@ -81,7 +81,7 @@ try:
         YUNET_MODEL_PATH, 
         "", 
         YUNET_INPUT_SIZE, 
-        0.4, # Your set confidence
+        0.4, 
         0.3, 
         5000 
     )
@@ -134,10 +134,6 @@ picam2.start()
 time.sleep(1.0) 
 print(f"Picamera2 started at {FRAME_WIDTH}x{FRAME_HEIGHT}.")
 
-
-# =================================================================
-# --- 5. MAIN CONTROL LOOP ---
-# =================================================================
 
 def cleanup_and_exit():
     """Stops the camera, resets servos, and closes OpenCV windows."""
@@ -266,15 +262,11 @@ try:
                 if EMOTION_COUNTER >= REQUIRED_EMOTION_FRAMES and CANDIDATE_EMOTION != CURRENT_EMOTION:
                     # 1. We have a confirmed new emotion!
                     CURRENT_EMOTION = CANDIDATE_EMOTION
+                    display_emotion(CURRENT_EMOTION)
                     
                     if CURRENT_EMOTION != "idle":
-                        
-                        # 2. Update the OLED display first
-                        
-                        # 3. Decide if this emotion triggers a gesture
-                        display_emotion(CURRENT_EMOTION)
                         gesture_to_perform = None
-                        if CURRENT_EMOTION == "Happy" or CURRENT_EMOTION == "Smile":
+                        if CURRENT_EMOTION == "Happy":
                             gesture_to_perform = "happy_shake"
                             
                         # --- You can add more gestures here ---
@@ -286,15 +278,7 @@ try:
                         # 4. If we have a gesture, perform it
                         if gesture_to_perform:
                             print(f"--- Emotive Gesture Triggered: {gesture_to_perform} ---")
-                            
-                            # We MUST reset the PID controllers.
-                            # While the gesture runs, the face will move,
-                            # and we don't want the PID building up huge error.
                             pan_pid.reset()
-                            tilt_pid.reset()
-                            
-                            # Call the new gesture function. It will PAUSE this loop
-                            # until the gesture is finished.
                             new_pan, new_tilt = head_gestures.perform_gesture(
                                 gesture_to_perform,
                                 pan_servo,
@@ -302,15 +286,11 @@ try:
                                 current_pan_angle,
                                 current_tilt_angle
                             )
-                            
-                            # IMPORTANT: Update our main loop's "current" angles
-                            # to match where the gesture left the head.
+
                             current_pan_angle = new_pan
                             current_tilt_angle = new_tilt
                             print(f"--- Gesture Complete. Resuming PID tracking. ---")
-                                         
-            # --- Drawing for Face and Emotion ---
-            # Draw the BLUE box on the CLOSEST face
+
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
             
             # Draw the emotion text on the CLOSEST face

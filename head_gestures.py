@@ -45,8 +45,8 @@ def _shake_head(pan_servo, start_angle):
     Returns the final angle (which is the start_angle).
     """
     print(f"  [Gesture] Shaking head from start: {start_angle:.1f}°")
-    shake_amount = 11  # How many degrees to move left/right
-    anim_time = 0.00095   # Time for one move (e.g., center to left)
+    shake_amount = 8  # How many degrees to move left/right
+    anim_time = 0.0005   # Time for one move (e.g., center to left)
     
     # Calculate target positions, clamping them to 0-180
     pos_left = max(0, start_angle - shake_amount)
@@ -57,6 +57,7 @@ def _shake_head(pan_servo, start_angle):
     _animate_servo(pan_servo, start_angle, pos_left, anim_time)
     # 2. Move to right (double duration since it crosses the center)
     _animate_servo(pan_servo, pos_left, pos_right, anim_time * 2)
+    
     # 3. Return to start
     _animate_servo(pan_servo, pos_right, start_angle, anim_time)
     
@@ -76,8 +77,8 @@ def _nod_head(tilt_servo, start_angle):
     Returns the final angle (which is the start_angle).
     """
     print(f"  [Gesture] Nodding head from start: {start_angle:.1f}°")
-    nod_amount = 5  # How many degrees to move up/down
-    anim_time = 0.2    # Time for one move
+    nod_amount = 8  # How many degrees to move up/down
+    anim_time = 0.05    # Time for one move
     
     # Remember: TILT_CENTER - offset. 
     # Smaller angle = UP, Larger angle = DOWN

@@ -14,6 +14,7 @@ env/
 
 # Image formats
 *.jpg
+*.txt
 *.jpeg
 *.png
 *.gif
