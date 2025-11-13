@@ -7,7 +7,7 @@ picam2 = Picamera2()
 
 # 2. Configure the camera for video streaming
 # 'XRGB8888' is a good format for seamless conversion to OpenCV arrays
-config = picam2.create_video_configuration(main={"format": 'XRGB8888', "size": (640, 480)})
+config = picam2.create_video_configuration(main={"format": 'XRGB8888', "size": (1280, 720)})
 picam2.configure(config)
 
 # 3. Start the camera stream

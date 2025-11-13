@@ -45,8 +45,8 @@ def _shake_head(pan_servo, start_angle):
     Returns the final angle (which is the start_angle).
     """
     print(f"  [Gesture] Shaking head from start: {start_angle:.1f}°")
-    shake_amount = 10  # How many degrees to move left/right
-    anim_time = 0.005   # Time for one move (e.g., center to left)
+    shake_amount = 11  # How many degrees to move left/right
+    anim_time = 0.00095   # Time for one move (e.g., center to left)
     
     # Calculate target positions, clamping them to 0-180
     pos_left = max(0, start_angle - shake_amount)
@@ -59,6 +59,7 @@ def _shake_head(pan_servo, start_angle):
     _animate_servo(pan_servo, pos_left, pos_right, anim_time * 2)
     # 3. Return to start
     _animate_servo(pan_servo, pos_right, start_angle, anim_time)
+    
 
     # --- Cycle 2 ---
     # _animate_servo(pan_servo, start_angle, pos_left, anim_time)

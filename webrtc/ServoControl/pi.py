@@ -7,28 +7,29 @@ from adafruit_servokit import ServoKit
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
 from signal import SIGINT, SIGTERM
 
-# --- Configuration ---
-# PCA9685 Channel Indices (0-15)
-PAN_SERVO_GPIO = 0  # Pan (left/right) servo, connected to channel 0
-TILT_SERVO_GPIO = 1 # Tilt (up/down) servo, connected to channel 1
+
+PAN_SERVO_GPIO = 1  # Pan (left/right) servo, connected to channel 0
+TILT_SERVO_GPIO = 0 # Tilt (up/down) servo, connected to channel 1
 
 # Servo min/max angles (Used for mapping joystick input)
 PAN_SERVO_MIN_ANGLE = 50
 PAN_SERVO_MAX_ANGLE = 150
 TILT_SERVO_MIN_ANGLE = 30
 TILT_SERVO_MAX_ANGLE = 150
-# --- End Configuration ---
+
+current_pan_angle = 90.0
+current_tilt_angle = 90.0
+SMOOTHING_ALPHA = 0.3
 
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("robot_pi")
 
-# Global PeerConnection
+
 pc = RTCPeerConnection()
 servos_enabled = False
 
-# --- Servo Setup (PCA9685/ServoKit) ---
+
 try:
     # Initialize ServoKit for the PCA9685 (16 channels)
     kit = ServoKit(channels=16) 
@@ -56,37 +57,48 @@ except Exception as e:
 
 
 def move_servos(x, y):
-    """Maps joystick data (-127 to 127) to servo angles using ServoKit.
-    NOTE: The current mapping logic (user-requested) will map (x=0, y=0) to MIN_ANGLE, not the center angle.
-    If you want (x=0, y=0) to map to 90 degrees, you should use (x + 127) / 254.0 as the normalized value.
-    """
+    """Maps joystick data (-127 to 127) to servo angles and applies smoothing."""
+    global current_pan_angle, current_tilt_angle # Must declare globals to modify them
+    
     if not servos_enabled:
         return
 
     try:
-        # --- START USER'S REQUESTED MAPPING LOGIC ---
-        # Map X to Pan servo
-        # (x / 254) * (max - min) + min
-        pan_angle = ((x / 254.0)+1) * (PAN_SERVO_MAX_ANGLE - PAN_SERVO_MIN_ANGLE) + PAN_SERVO_MIN_ANGLE
+        # 1. CALCULATE TARGET ANGLE (The same correct mapping logic)
+        normalized_pan = (x + 127.0) / 254.0
+        normalized_tilt = (y + 127.0) / 254.0
+
+        pan_range = PAN_SERVO_MAX_ANGLE - PAN_SERVO_MIN_ANGLE
+        tilt_range = TILT_SERVO_MAX_ANGLE - TILT_SERVO_MIN_ANGLE
         
-        # Map Y to Tilt servo
-        # (y / 254) * (max - min) + min
-        tilt_angle = ((y / 254.0)+1) * (TILT_SERVO_MAX_ANGLE - TILT_SERVO_MIN_ANGLE) + TILT_SERVO_MIN_ANGLE
-        # --- END USER'S REQUESTED MAPPING LOGIC ---
+        target_pan_angle = (normalized_pan * pan_range) + PAN_SERVO_MIN_ANGLE
+        target_tilt_angle = (normalized_tilt * tilt_range) + TILT_SERVO_MIN_ANGLE
         
-        # Clamp values to be safe
-        pan_angle = max(PAN_SERVO_MIN_ANGLE, min(PAN_SERVO_MAX_ANGLE, pan_angle))
-        tilt_angle = max(TILT_SERVO_MIN_ANGLE, min(TILT_SERVO_MAX_ANGLE, tilt_angle))
+        # 2. APPLY MOTION SMOOTHING (Lerp)
+        
+        # Calculate the new pan angle by moving 15% (0.15) of the way toward the target
+        new_pan_angle = (current_pan_angle * (1.0 - SMOOTHING_ALPHA)) + (target_pan_angle * SMOOTHING_ALPHA)
+        
+        # Calculate the new tilt angle by moving 15% (0.15) of the way toward the target
+        new_tilt_angle = (current_tilt_angle * (1.0 - SMOOTHING_ALPHA)) + (target_tilt_angle * SMOOTHING_ALPHA)
+        
+        
+        # 3. Clamp values and update state
+        final_pan_angle = max(PAN_SERVO_MIN_ANGLE, min(PAN_SERVO_MAX_ANGLE, new_pan_angle))
+        final_tilt_angle = max(TILT_SERVO_MIN_ANGLE, min(TILT_SERVO_MAX_ANGLE, new_tilt_angle))
+
+        # Update the global tracking variables for the next cycle
+        current_pan_angle = final_pan_angle
+        current_tilt_angle = final_tilt_angle
 
         # Control Servos using ServoKit
-        kit.servo[PAN_SERVO_GPIO].angle = pan_angle
-        kit.servo[TILT_SERVO_GPIO].angle = tilt_angle
+        kit.servo[PAN_SERVO_GPIO].angle = final_pan_angle
+        kit.servo[TILT_SERVO_GPIO].angle = final_tilt_angle
             
-        logger.info(f"Servos -> Pan: {pan_angle:.1f}°, Tilt: {tilt_angle:.1f}°")
+        logger.info(f"Servos -> Pan: {final_pan_angle:.1f}°, Tilt: {final_tilt_angle:.1f}°")
 
     except Exception as e:
         logger.error(f"Error moving servos via ServoKit: {e}")
-
 
 # --- WebRTC Event Handlers ---
 
@@ -115,8 +127,10 @@ def on_datachannel(channel):
 
             logger.info(f"Received: J1_X={x}, J1_Y={y}, SW={switches}")
             
+            
             # This is where we control the robot!
-            move_servos(x, y)
+            print(x, y)
+            move_servos(x, -y)
             
         except Exception as e:
             logger.warning(f"Error processing message: {e}")

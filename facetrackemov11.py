@@ -272,10 +272,10 @@ try:
                         # 2. Update the OLED display first
                         
                         # 3. Decide if this emotion triggers a gesture
+                        display_emotion(CURRENT_EMOTION)
                         gesture_to_perform = None
                         if CURRENT_EMOTION == "Happy" or CURRENT_EMOTION == "Smile":
                             gesture_to_perform = "happy_shake"
-                            display_emotion(CURRENT_EMOTION)
                             
                         # --- You can add more gestures here ---
                         # elif CURRENT_EMOTION == "Sad":
