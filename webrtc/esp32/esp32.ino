@@ -6,7 +6,7 @@
  * You need an ESP32 for its multiple analog pins and BLE server capabilities.
  *
  * WIRING (ESP32):
- * - Joy1 X  -> GPIO 34 (ADC1_CH6)
+ * - Joy1 X  -> GPIO 35 (ADC1_CH6)
  * - Joy1 Y  -> GPIO 35 (ADC1_CH7)
  * - Joy2 X  -> GPIO 32 (ADC1_CH4)
  * - Joy2 Y  -> GPIO 33 (ADC1_CH5)
@@ -37,11 +37,6 @@
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-// Global BLE Characteristic
-BLECharacteristic *pCharacteristic;
-bool deviceConnected = false;
-ControlData lastControllerInput; // To send data only on change
-
 // Data structure to hold all control data
 // This is what we will send over BLE.
 struct ControlData {
@@ -51,6 +46,13 @@ struct ControlData {
   int8_t  joy2_y; // -127 to 127
   uint8_t switches; // 1 byte, 8 bits for 8 switches
 };
+
+
+// Global BLE Characteristic
+BLECharacteristic *pCharacteristic;
+bool deviceConnected = false;
+ControlData lastControllerInput; // To send data only on change
+
 
 ControlData controllerInput;
 
@@ -70,7 +72,7 @@ int8_t mapJoystick(int value) {
 void readInputs() {
   controllerInput.joy1_x = mapJoystick(analogRead(JOY1_X_PIN));
   // Invert Y-axis for standard "up = positive" control
-  controllerInput.joy1_y = -mapJoystick(analogRead(JOY1_Y_PIN)); 
+  controllerInput.joy1_y = mapJoystick(analogRead(JOY1_Y_PIN)); 
   
   controllerInput.joy2_x = mapJoystick(analogRead(JOY2_X_PIN));
   controllerInput.joy2_y = -mapJoystick(analogRead(JOY2_Y_PIN));
