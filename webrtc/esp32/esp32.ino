@@ -6,7 +6,7 @@
  * You need an ESP32 for its multiple analog pins and BLE server capabilities.
  *
  * WIRING (ESP32):
- * - Joy1 X  -> GPIO 35 (ADC1_CH6)
+ * - Joy1 X  -> GPIO 34 (ADC1_CH6)
  * - Joy1 Y  -> GPIO 35 (ADC1_CH7)
  * - Joy2 X  -> GPIO 32 (ADC1_CH4)
  * - Joy2 Y  -> GPIO 33 (ADC1_CH5)

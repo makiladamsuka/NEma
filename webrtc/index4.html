@@ -1,249 +1,624 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Robot Head Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 BLE to WebRTC Gateway</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Ensure the page is not zoomable and fits the screen */
-        body, html {
-            height: 100%;
-            overflow: hidden;
+        :root {
+            --primary-color: #4f46e5;
+            --secondary-color: #1f2937;
+            --text-color: #f3f4f6;
+        }
+        body {
             font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Dark background */
+            color: var(--text-color);
         }
-        /* Custom style for video elements */
-        video {
-            width: 100%;
-            background: #222;
-            border-radius: 0.5rem;
-            transform: scaleX(-1); /* Mirror local video */
+        .container {
+            max-width: 100vw;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
         }
-        #remoteVideo {
-            transform: scaleX(1); /* Don't mirror remote video */
+        .joystick-canvas {
+            background: var(--secondary-color);
+            border: 2px solid var(--primary-color);
+            border-radius: 1rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            touch-action: none; 
+            cursor: default; 
+        }
+        #status-indicator-ble, #status-indicator-webrtc {
+            transition: background-color 0.5s, transform 0.3s;
         }
     </style>
-    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
 </head>
-<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 h-full flex flex-col p-4 md:p-8 gap-4 overflow-hidden">
-    <h1 class="text-3xl font-bold text-center">Robot Head Telepresence (Automated Signaling)</h1>
+<body>
 
-    <div class="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
+<div class="container mx-auto">
+    <h1 class="text-3xl font-bold text-center text-primary-color mb-4">BLE-to-WebRTC Robot Gateway</h1>
+    <p class="text-center text-sm text-gray-400 mb-6">Connect to the ESP32 to receive controls, then connect to the Robot (Pi) to transmit them.</p>
+
+    <div class="bg-gray-800 p-4 rounded-xl shadow-lg mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
         
-        <div class="flex-1 flex flex-col gap-4 overflow-hidden">
-            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow flex-1 flex flex-col">
-                <h2 class="text-xl font-semibold mb-2">Robot View</h2>
-                <div class="aspect-video w-full rounded-lg bg-gray-700 flex-1">
-                    <video id="remoteVideo" autoplay playsinline></video>
-                </div>
+        <div class="p-3 border-r border-gray-700 md:border-r-0">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-xl font-semibold text-indigo-300">BLE Controller Status</h2>
+                <div id="status-indicator-ble" class="w-4 h-4 rounded-full bg-red-500 transform scale-100"></div>
             </div>
-            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow flex-1 flex flex-col">
-                <h2 class="text-xl font-semibold mb-2">Your View</h2>
-                <div class="aspect-video w-full rounded-lg bg-gray-700 flex-1">
-                    <video id="localVideo" autoplay muted playsinline></video>
-                </div>
-            </div>
+            <div id="status-message-ble" class="text-sm text-red-400 mb-3">Disconnected from ESP32.</div>
+            <button id="connect-ble" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 shadow-md">
+                Connect ESP32 (BLE)
+            </button>
+            <button id="calibrate-joysticks" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg mt-2 transition duration-300 shadow-md" disabled>
+                Calibrate Joysticks
+            </button>
         </div>
 
-        <div class="flex-1 flex flex-col gap-4 overflow-y-auto">
-            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-2">1. Controller (ESP32)</h3>
-                <button id="connectBluetooth" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
-                    Connect to Controller (Bluetooth)
-                </button>
-                <div class="mt-2 p-2 h-32 bg-gray-200 dark:bg-gray-700 rounded overflow-auto">
-                    <pre id="controllerData" class="text-sm">Waiting for controller...</pre>
+        <div class="p-3">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-xl font-semibold text-cyan-300">WebRTC Robot Status</h2>
+                <div id="status-indicator-webrtc" class="w-4 h-4 rounded-full bg-red-500 transform scale-100"></div>
+            </div>
+            <div id="status-message-webrtc" class="text-sm text-red-400 mb-3">Disconnected from Robot.</div>
+            <button id="start-webrtc" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 shadow-md">
+                Start WebRTC Connection
+            </button>
+        </div>
+    </div>
+
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-grow">
+
+        <div class="lg:col-span-2 bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col items-center">
+            <h3 class="text-lg font-semibold mb-2">J1: Pan/Tilt Control (Received)</h3>
+            <canvas id="joystick-j1" class="joystick-canvas w-full max-w-sm aspect-square"></canvas>
+            <div id="j1-display" class="mt-2 text-sm text-gray-400">X: 0, Y: 0</div>
+            <div id="j1-offset-display" class="mt-1 text-xs text-gray-500">Offset X: 0, Y: 0</div>
+        </div>
+
+        <div class="lg:col-span-1 flex flex-col space-y-6">
+            
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+                <h3 class="text-lg font-semibold mb-3">Switches (SW Bitmask)</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-1" data-bit="0" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm">Switch 1 (Bit 0)</span>
+                    </label>
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-2" data-bit="1" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm">Switch 2 (Bit 1)</span>
+                    </label>
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-3" data-bit="2" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm">Switch 3 (Bit 2)</span>
+                    </label>
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-4" data-bit="3" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm">Switch 4 (Bit 3)</span>
+                    </label>
                 </div>
             </div>
             
-            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-2">2. Robot (Raspberry Pi)</h3>
-                <button id="connectWebRTC" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 hidden">
-                    Start Robot Connection (WebRTC)
-                </button>
-                <div id="webRtcStatus" class="mt-2 text-center text-sm">WebRTC Inactive (Connect Bluetooth and press Switch 1)</div>
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col items-center">
+                <h3 class="text-lg font-semibold mb-2">J2: Auxiliary Control (Received)</h3>
+                <canvas id="joystick-j2" class="joystick-canvas w-full max-w-xs aspect-square"></canvas>
+                <div id="j2-display" class="mt-2 text-sm text-gray-400">X: 0, Y: 0</div>
+                <div id="j2-offset-display" class="mt-1 text-xs text-gray-500">Offset X: 0, Y: 0</div>
             </div>
-
-            </div>
+            
+        </div>
+    </div>
+    
     </div>
 
-    <script>
-        // DOM Elements
-        const controllerDataEl = document.getElementById('controllerData');
-        const webRtcStatusEl = document.getElementById('webRtcStatus');
-        const localVideoEl = document.getElementById('localVideo');
-        const remoteVideoEl = document.getElementById('remoteVideo');
+<script>
+    // --- Configuration & Globals ---
+    const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+    const CONTROL_INTERVAL = 50; // ms (20 updates/sec for WebRTC)
 
-        // --- GLOBAL CONFIGURATION ---
-        // REPLACE [YOUR_PI_IP_ADDRESS] with the actual IP address of your Raspberry Pi
-        const ROBOT_SIGNALING_URL = "ws://[YOUR_PI_IP_ADDRESS]:8765"; 
+    // --- NEW: Signaling Server URL ---
+    // !!! IMPORTANT: Replace with your Raspberry Pi's actual IP address !!!
+    const SIGNALING_SERVER_URL = "ws://192.168.1.10:8765/web"; 
+    // For example: "ws://192.168.1.25:8765/web" or "ws://raspberrypi.local:8765/web"
+
+    let bleDevice = null;
+    let controlCharacteristic = null;
+    let pc = null;
+    let dataChannel = null;
+    let sendDataInterval = null;
+    let signalingSocket = null; // <-- NEW: WebSocket global
+
+    // Latest data received from ESP32 BLE (RAW values)
+    let rawControlData = {
+        j1: { x: 0, y: 0 },
+        j2: { x: 0, y: 0 },
+        sw: 0
+    };
+    
+    // Offsets determined during calibration
+    let offsets = {
+        j1: { x: 0, y: 0, display: 'j1-offset-display' },
+        j2: { x: 0, y: 0, display: 'j2-offset-display' }
+    };
+    let isCalibrating = false;
+    let calibrationData = { j1x: [], j1y: [], j2x: [], j2y: [] };
+    const CALIBRATION_DURATION_MS = 5000; // 5 seconds
+
+    // Visualization data
+    const joystickVisuals = {
+        j1: { canvas: 'joystick-j1', display: 'j1-display' },
+        j2: { canvas: 'joystick-j2', display: 'j2-display' }
+    };
+
+
+    // --- Utility Functions ---
+    
+    function getCssVar(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function updateStatus(idSuffix, indicatorClass, message) {
+        const indicator = document.getElementById(`status-indicator-${idSuffix}`);
+        const msg = document.getElementById(`status-message-${idSuffix}`);
         
-        // WebRTC Globals
-        let peerConnection;
-        let dataChannel;
-        let localStream;
-        let signalingSocket;
-        let isWebRTCStarting = false; // Flag to prevent multiple starts
+        indicator.className = `w-4 h-4 rounded-full ${indicatorClass} transform scale-100`;
+        msg.textContent = message;
+        msg.className = `text-sm ${indicatorClass.replace('bg-', 'text-')}`;
+    }
+    
+    // This function is no longer used by the UI but can be kept for debugging
+    function copyToClipboard(elementId, button) {
+        const element = document.getElementById(elementId);
+        const textToCopy = element.textContent;
         
-        const iceConfiguration = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }, // Google's public STUN server
-            ]
+        try {
+            const tempInput = document.createElement("textarea");
+            tempInput.value = textToCopy;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            button.textContent = 'Copied!';
+            setTimeout(() => { button.textContent = elementId.includes('sdp') ? 'Copy Offer' : 'Copy ICE Candidates'; }, 1500);
+        } catch (err) {
+            console.error('Copy failed:', err);
+        }
+    }
+
+
+    // --- BLE Logic (Input from ESP32) ---
+
+    async function connectToBLE() {
+        if (!navigator.bluetooth) {
+            updateStatus('ble', 'bg-red-500', 'Web Bluetooth API is not available.');
+            return;
+        }
+
+        if (bleDevice && bleDevice.gatt.connected) {
+            bleDevice.gatt.disconnect();
+            return;
+        }
+
+        try {
+            updateStatus('ble', 'bg-yellow-500', 'Scanning for ESP32...');
+            
+            bleDevice = await navigator.bluetooth.requestDevice({
+                filters: [{ services: [SERVICE_UUID] }],
+                optionalServices: [SERVICE_UUID]
+            });
+
+            bleDevice.addEventListener('gattserverdisconnected', onBLEDisconnected);
+            updateStatus('ble', 'bg-yellow-500', `Connecting to ${bleDevice.name || 'Device'}...`);
+
+            const server = await bleDevice.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            controlCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+            await controlCharacteristic.startNotifications();
+            controlCharacteristic.addEventListener('characteristicvaluechanged', handleControlData);
+
+            updateStatus('ble', 'bg-green-500', `CONNECTED to ${bleDevice.name || 'ESP32'}! Receiving data.`);
+            document.getElementById('connect-ble').textContent = 'Disconnect ESP32';
+            document.getElementById('calibrate-joysticks').disabled = false; // Enable calibration after connection
+
+        } catch (error) {
+            console.error('BLE Connection Error:', error);
+            updateStatus('ble', 'bg-red-500', `Connection failed: ${error.message}`);
+            document.getElementById('connect-ble').textContent = 'Connect ESP32 (BLE)';
+        }
+    }
+
+    function onBLEDisconnected(event) {
+        const device = event.target;
+        console.log(`BLE Device ${device.name} disconnected.`);
+        updateStatus('ble', 'bg-red-500', `Disconnected from ${device.name}.`);
+        document.getElementById('connect-ble').textContent = 'Connect ESP32 (BLE)';
+        document.getElementById('calibrate-joysticks').disabled = true; // Disable calibration on disconnect
+        bleDevice = null;
+        controlCharacteristic = null;
+    }
+    
+    function handleControlData(event) {
+        const value = event.target.value; // DataView object
+        if (value.byteLength !== 5) {
+            console.warn(`Received unexpected data size: ${value.byteLength} bytes (expected 5)`);
+            return;
+        }
+        
+        // Decode the 5-byte struct from ESP32 (RAW values)
+        // struct ControlData {
+        //   int8_t  joy1_x; // Byte 0
+        //   int8_t  joy1_y; // Byte 1
+        //   int8_t  joy2_x; // Byte 2
+        //   int8_t  joy2_y; // Byte 3
+        //   uint8_t switches; // Byte 4
+        // }
+        const j1_x_raw = value.getInt8(0); // Byte 0
+        const j1_y_raw = value.getInt8(1); // Byte 1
+        const j2_x_raw = value.getInt8(2); // Byte 2
+        const j2_y_raw = value.getInt8(3); // Byte 3
+        const switches = value.getUint8(4); // Byte 4
+        
+        // 1. Update RAW Global Control Data
+        rawControlData.j1.x = j1_x_raw;
+        rawControlData.j1.y = j1_y_raw;
+        rawControlData.j2.x = j2_x_raw;
+        rawControlData.j2.y = j2_y_raw;
+        rawControlData.sw = switches;
+
+        // 2. Calibration State Check
+        if (isCalibrating) {
+            calibrationData.j1x.push(j1_x_raw);
+            calibrationData.j1y.push(j1_y_raw);
+            calibrationData.j2x.push(j2_x_raw);
+            calibrationData.j2y.push(j2_y_raw);
+            return; // Don't process for display/send during calibration
+        }
+
+        // 3. Apply Calibration Offsets
+        const j1_x_cal = j1_x_raw - offsets.j1.x;
+        const j1_y_cal = j1_y_raw - offsets.j1.y;
+        const j2_x_cal = j2_x_raw - offsets.j2.x;
+        const j2_y_cal = j2_y_raw - offsets.j2.y;
+
+        // 4. Update Visualizations (using calibrated values)
+        updateJoystickDisplay(j1_x_cal, j1_y_cal, 'j1');
+        updateJoystickDisplay(j2_x_cal, j2_y_cal, 'j2');
+        updateSwitches(switches);
+    }
+
+    // --- Calibration Logic ---
+
+    function startCalibration() {
+        if (!bleDevice || !bleDevice.gatt.connected) {
+            updateStatus('ble', 'bg-red-500', 'Connect to ESP32 first to calibrate!');
+            return;
+        }
+
+        isCalibrating = true;
+        calibrationData = { j1x: [], j1y: [], j2x: [], j2y: [] };
+
+        const calibrateButton = document.getElementById('calibrate-joysticks');
+        calibrateButton.disabled = true;
+        updateStatus('ble', 'bg-yellow-500', `CALIBRATING (5s): DO NOT TOUCH JOYS!`);
+
+        // Update button text and start timer
+        let timeLeft = CALIBRATION_DURATION_MS / 1000;
+        calibrateButton.textContent = `Calibrating... ${timeLeft}s`;
+
+        const countdown = setInterval(() => {
+            timeLeft--;
+            calibrateButton.textContent = `Calibrating... ${timeLeft}s`;
+            if (timeLeft <= 0) {
+                clearInterval(countdown);
+                processCalibrationData();
+            }
+        }, 1000);
+    }
+
+    function processCalibrationData() {
+        isCalibrating = false;
+        const calibrateButton = document.getElementById('calibrate-joysticks');
+        
+        const calcAvg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+        
+        if (calibrationData.j1x.length === 0) {
+            updateStatus('ble', 'bg-red-500', 'Calibration failed: No data received.');
+            calibrateButton.disabled = false;
+            calibrateButton.textContent = 'Calibrate Joysticks';
+            return;
+        }
+
+        // Calculate and apply J1 offsets
+        offsets.j1.x = Math.round(calcAvg(calibrationData.j1x));
+        offsets.j1.y = Math.round(calcAvg(calibrationData.j1y));
+
+        // Calculate and apply J2 offsets
+        offsets.j2.x = Math.round(calcAvg(calibrationData.j2x));
+        offsets.j2.y = Math.round(calcAvg(calibrationData.j2y));
+
+        // Update offset display
+        document.getElementById(offsets.j1.display).textContent = `Offset X: ${offsets.j1.x}, Y: ${offsets.j1.y}`;
+        document.getElementById(offsets.j2.display).textContent = `Offset X: ${offsets.j2.x}, Y: ${offsets.j2.y}`;
+
+        updateStatus('ble', 'bg-green-500', 'Calibration Complete. Offsets saved.');
+        calibrateButton.textContent = 'Calibrate Joysticks';
+        calibrateButton.disabled = false;
+    }
+
+
+    // --- WebRTC Logic (MODIFIED for Automated Signaling) ---
+
+    function connectSignalingServer() {
+        // This function REPLACES the old startWebRTC() as the button's click handler
+        // It will start the WebSocket connection, which *then* triggers startWebRTC()
+        
+        if (signalingSocket && signalingSocket.readyState === WebSocket.OPEN) {
+            console.log("Signaling server already connected.");
+            return;
+        }
+        
+        updateStatus('webrtc', 'bg-yellow-500', 'Connecting to Signaling Server...');
+        document.getElementById('start-webrtc').disabled = true;
+
+        try {
+            signalingSocket = new WebSocket(SIGNALING_SERVER_URL);
+        } catch (e) {
+            console.error("WebSocket URL is invalid:", e);
+            updateStatus('webrtc', 'bg-red-500', 'Signaling URL is invalid. Check Pi IP.');
+            document.getElementById('start-webrtc').disabled = false;
+            return;
+        }
+
+
+        signalingSocket.onopen = () => {
+            console.log("Signaling server connected.");
+            updateStatus('webrtc', 'bg-blue-500', 'Signaling connected. Starting WebRTC...');
+            // Now that the "tube" is open, start the WebRTC process
+            startWebRTC(); 
         };
 
-        // --- 1. Bluetooth Controller Logic ---
-        document.getElementById('connectBluetooth').addEventListener('click', async () => {
-            controllerDataEl.textContent = 'Scanning for devices...';
+        signalingSocket.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            console.log("Received message from signaling server:", data);
 
-            // --- UUIDs MUST match your ESP32 code ---
-            const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-            const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-
-            try {
-                // Filter for *only* your controller's service
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SERVICE_UUID] }]
-                });
-
-                controllerDataEl.textContent = `Connecting to ${device.name}...`;
-                const server = await device.gatt.connect();
-
-                controllerDataEl.textContent = 'Getting service...';
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                
-                controllerDataEl.textContent = 'Getting characteristic...';
-                const characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
-
-                controllerDataEl.textContent = 'Starting notifications...';
-                await characteristic.startNotifications();
-                
-                characteristic.addEventListener('characteristicvaluechanged', (event) => {
-                    const value = event.target.value; // This is a DataView
-                    
-                    // --- Parse your ESP32 data struct ---
-                    if (value.byteLength < 5) return; // Not our data packet
-
-                    const joy1_x = value.getInt8(0);
-                    const joy1_y = value.getInt8(1);
-                    const joy2_x = value.getInt8(2);
-                    const joy2_y = value.getInt8(3);
-                    const switches = value.getUint8(4);
-
-                    // 1. --- CONNECTION TRIGGER LOGIC (Switch 1) ---
-                    // Check if Switch 1 (bit 0) is pressed AND WebRTC hasn't started
-                    const isSwitch1Pressed = (switches & 0x01) > 0;
-
-                    if (isSwitch1Pressed && !isWebRTCStarting) {
-                        isWebRTCStarting = true; // Set flag to prevent multiple starts
-                        webRtcStatusEl.textContent = 'Switch detected! Starting WebRTC connection...';
-                        
-                        // Programmatically click the hidden WebRTC button
-                        document.getElementById('connectWebRTC').click();
-                    }
-                    // ------------------------------------
-
-                    // Display the data
-                    const dataString = `Joy1 X: ${joy1_x}\nJoy1 Y: ${joy1_y}\nJoy2 X: ${joy2_x}\nJoy2 Y: ${joy2_y}\nSW: ${switches}`;
-                    controllerDataEl.textContent = dataString;
-
-                    // Create the JSON object to send to the robot
-                    const controlPacket = {
-                        j1: { x: joy1_x, y: joy1_y },
-                        j2: { x: joy2_x, y: joy2_y },
-                        sw: switches
-                    };
-
-                    // 2. --- Send data over WebRTC Data Channel ---
-                    if (dataChannel && dataChannel.readyState === 'open') {
-                       // Send the full control packet as a JSON string
-                       dataChannel.send(JSON.stringify(controlPacket));
-                    }
-                });
-
-            } catch (error) {
-                console.error('Bluetooth Error:', error);
-                controllerDataEl.textContent = `Error: ${error.message}`;
-            }
-        });
-
-        // --- 2. WebRTC Connection Logic (WebSocket Automated) ---
-        document.getElementById('connectWebRTC').addEventListener('click', async () => {
-            webRtcStatusEl.textContent = 'Connecting to signaling server...';
-
-            try {
-                // 1. Establish WebSocket connection to the Pi
-                signalingSocket = new WebSocket(ROBOT_SIGNALING_URL);
-
-                signalingSocket.onopen = async () => {
-                    webRtcStatusEl.textContent = 'Signaling connected. Starting WebRTC...';
-                    
-                    // Get local camera and microphone
-                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                    localVideoEl.srcObject = localStream;
-
-                    peerConnection = new RTCPeerConnection(iceConfiguration);
-
-                    // Add local tracks to the connection
-                    localStream.getTracks().forEach(track => {
-                        peerConnection.addTrack(track, localStream);
-                    });
-
-                    // Handle incoming remote stream
-                    peerConnection.ontrack = (event) => {
-                        webRtcStatusEl.textContent = 'Receiving remote stream!';
-                        if (!remoteVideoEl.srcObject) {
-                            remoteVideoEl.srcObject = event.streams[0];
-                        }
-                    };
-
-                    // Create the Data Channel (for controls)
-                    dataChannel = peerConnection.createDataChannel('controls', { ordered: false, maxRetransmits: 0 });
-                    dataChannel.onopen = () => webRtcStatusEl.textContent = 'Data channel OPEN';
-                    dataChannel.onclose = () => webRtcStatusEl.textContent = 'Data channel CLOSED';
-                    dataChannel.onerror = (err) => console.error('Data channel error:', err);
-
-                    // Handle ICE candidates: SEND THEM VIA WEBSOCKET
-                    peerConnection.onicecandidate = (event) => {
-                        if (event.candidate) {
-                            // Send the candidate as a JSON string to the signaling server
-                            signalingSocket.send(JSON.stringify(event.candidate.toJSON()));
-                        }
-                    };
-                    
-                    // Handle incoming messages from the signaling server (The Robot's Answer/ICEs)
-                    signalingSocket.onmessage = async (event) => {
-                        const message = JSON.parse(event.data);
-                        
-                        if (message.type === 'answer') {
-                            // Set the Answer
-                            await peerConnection.setRemoteDescription(new RTCSessionDescription(message));
-                            webRtcStatusEl.textContent = 'Robot Answer set! Connection pending...';
-                        } else if (message.candidate) {
-                            // Add the Robot's ICE candidate
-                            await peerConnection.addIceCandidate(new RTCIceCandidate(message));
-                            webRtcStatusEl.textContent = 'Added Robot ICE candidate.';
-                        }
-                    };
-
-                    // Create SDP Offer
-                    const offer = await peerConnection.createOffer();
-                    await peerConnection.setLocalDescription(offer);
-
-                    // SEND THE OFFER VIA WEBSOCKET
-                    signalingSocket.send(JSON.stringify(peerConnection.localDescription));
-                    webRtcStatusEl.textContent = 'Offer sent to robot.';
-                };
-
-                signalingSocket.onerror = (error) => {
-                    webRtcStatusEl.textContent = `Signaling Error: Could not connect to robot.`;
-                    console.error('WebSocket Error:', error);
+            if (data.type === 'answer') {
+                if (pc && pc.signalingState === 'have-local-offer') {
+                    updateStatus('webrtc', 'bg-yellow-500', 'Answer received. Setting remote...');
+                    await pc.setRemoteDescription(new RTCSessionDescription(data));
                 }
-
-            } catch (error) {
-                console.error('WebRTC/Media Error:', error);
-                webRtcStatusEl.textContent = `Error: ${error.message}`;
+            } else if (data.type === 'ice-candidate') {
+                try {
+                    if (pc && data.candidate) {
+                        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    }
+                } catch (e) {
+                    console.error("Error adding received ICE candidate", e);
+                }
             }
+        };
+
+        signalingSocket.onclose = () => {
+            console.log("Signaling server disconnected.");
+            updateStatus('webrtc', 'bg-red-500', 'Signaling server disconnected.');
+            document.getElementById('start-webrtc').disabled = false;
+            if (pc) {
+                pc.close();
+            }
+        };
+
+        signalingSocket.onerror = (error) => {
+            console.error("Signaling Server Error:", error);
+            updateStatus('webrtc', 'bg-red-500', 'Signaling server error. Check Pi IP.');
+            document.getElementById('start-webrtc').disabled = false;
+        };
+    }
+
+    async function startWebRTC() {
+        // This function is now called by connectSignalingServer()
+        
+        if (pc) {
+            pc.close();
+        }
+        
+        pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
         });
-    </script>
+        
+        // 1. Setup ICE Candidate handler
+        pc.onicecandidate = event => {
+            if (event.candidate && signalingSocket && signalingSocket.readyState === WebSocket.OPEN) {
+                console.log("Sending ICE candidate");
+                // Send candidate to Pi via signaling server
+                signalingSocket.send(JSON.stringify({
+                    type: 'ice-candidate',
+                    candidate: event.candidate.toJSON()
+                }));
+            }
+        };
+
+        // 2. Data Channel Setup
+        dataChannel = pc.createDataChannel("controls");
+        dataChannel.onopen = () => {
+            console.log("WebRTC Data Channel opened");
+            updateStatus('webrtc', 'bg-green-500', 'CONNECTED! Transmitting controls to Robot.');
+            // Start sending data once channel is open
+            sendDataInterval = setInterval(sendControlData, CONTROL_INTERVAL);
+        };
+        dataChannel.onclose = () => {
+            console.log("WebRTC Data Channel closed");
+            updateStatus('webrtc', 'bg-red-500', 'WebRTC Disconnected.');
+            clearInterval(sendDataInterval);
+        };
+        dataChannel.onerror = (error) => {
+            console.error("WebRTC Data Channel Error:", error);
+            updateStatus('webrtc', 'bg-red-500', `Data Channel Error: ${error.message}`);
+        };
+
+        // 3. Connection State Change
+        pc.onconnectionstatechange = () => {
+            console.log(`WebRTC state: ${pc.connectionState}`);
+            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                updateStatus('webrtc', 'bg-red-500', `Connection failed or closed: ${pc.connectionState}`);
+                document.getElementById('start-webrtc').disabled = false;
+                clearInterval(sendDataInterval);
+                if (signalingSocket) {
+                    signalingSocket.close(); // Close the WebSocket if WebRTC fails
+                }
+            } else if (pc.connectionState === 'connecting') {
+                updateStatus('webrtc', 'bg-yellow-500', 'Connecting...');
+            }
+        };
+        
+        // 4. Create Offer and send it
+        try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            
+            console.log("Sending Offer");
+            // Send Offer to Pi via signaling server
+            if (signalingSocket && signalingSocket.readyState === WebSocket.OPEN) {
+                signalingSocket.send(JSON.stringify(pc.localDescription.toJSON()));
+                updateStatus('webrtc', 'bg-blue-500', 'Offer sent. Waiting for Answer...');
+            } else {
+                updateStatus('webrtc', 'bg-red-500', 'Signaling server not connected. Aborting.');
+            }
+        } catch (e) {
+            console.error("Failed to create offer:", e);
+            updateStatus('webrtc', 'bg-red-500', `Failed to create offer: ${e.message}`);
+            document.getElementById('start-webrtc').disabled = false;
+        }
+    }
+    
+    // processSDP() is no longer needed
+
+    function sendControlData() {
+        // Check if WebRTC is connected AND BLE is providing data
+        if (dataChannel && dataChannel.readyState === 'open') {
+            
+            // Apply offsets to RAW data before sending!
+            const j1_x_cal = rawControlData.j1.x - offsets.j1.x;
+            const j1_y_cal = rawControlData.j1.y - offsets.j1.y;
+            const j2_x_cal = rawControlData.j2.x - offsets.j2.x;
+            const j2_y_cal = rawControlData.j2.y - offsets.j2.y;
+            
+            const payload = {
+                j1: { x: j1_x_cal, y: j1_y_cal },
+                j2: { x: j2_x_cal, y: j2_y_cal },
+                sw: rawControlData.sw
+            };
+            
+            try {
+                // Send JSON payload to the Raspberry Pi
+                dataChannel.send(JSON.stringify(payload));
+            } catch (e) {
+                console.warn("Failed to send data:", e);
+            }
+        }
+    }
+
+
+    // --- Visualization Functions (Now uses Calibrated values) ---
+    
+    function updateSwitches(bitmask) {
+        document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            const bit = parseInt(checkbox.getAttribute('data-bit'));
+            checkbox.checked = (bitmask & (1 << bit)) !== 0;
+        });
+    }
+
+    function updateJoystickDisplay(mappedX, mappedY, dataKey) {
+        const canvas = document.getElementById(joystickVisuals[dataKey].canvas);
+        if (!canvas) return;
+        
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const maxRadius = Math.min(centerX, centerY) * 0.45; // Max displacement
+
+        // Map the input range (-127 to 127) to maxRadius displacement.
+        const deltaX = (mappedX / 127) * maxRadius;
+        const deltaY = (-mappedY / 127) * maxRadius; // Invert Y for canvas coordinate system
+        
+        document.getElementById(joystickVisuals[dataKey].display).textContent = `X: ${mappedX}, Y: ${mappedY}`;
+
+        drawJoystick(joystickVisuals[dataKey].canvas, deltaX, deltaY);
+    }
+
+    function drawJoystick(id, x = 0, y = 0) {
+        const canvas = document.getElementById(id);
+        const ctx = canvas.getContext('2d');
+        
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = Math.min(centerX, centerY) * 0.45; 
+        const stickRadius = radius * 0.5; 
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw boundary circle
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius * 1.5, 0, Math.PI * 2, false);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = getCssVar('--primary-color'); 
+        ctx.stroke();
+
+        // Draw center stick
+        const stickX = centerX + x;
+        const stickY = centerY + y;
+        
+        ctx.beginPath();
+        ctx.arc(stickX, stickY, stickRadius, 0, Math.PI * 2, false);
+        ctx.fillStyle = getCssVar('--primary-color');
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.stroke();
+
+        // Draw center dot (Visual reference for the calibrated zero point)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 3, 0, Math.PI * 2, false);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+    }
+
+    function initJoystick(id) {
+        const canvas = document.getElementById(id);
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            drawJoystick(id, 0, 0);
+        }
+
+        const resizeObserver = new ResizeObserver(resizeCanvas);
+        resizeObserver.observe(canvas);
+        
+        resizeCanvas();
+    }
+
+
+    // --- Initialization ---
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initJoystick('joystick-j1');
+        initJoystick('joystick-j2');
+
+        document.getElementById('connect-ble').addEventListener('click', connectToBLE);
+        document.getElementById('calibrate-joysticks').addEventListener('click', startCalibration);
+        
+        // --- MODIFIED: The button now calls the signaling connector ---
+        document.getElementById('start-webrtc').addEventListener('click', connectSignalingServer);
+    });
+</script>
+
 </body>
 </html>
