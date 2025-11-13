@@ -62,11 +62,6 @@ int8_t mapJoystick(int value) {
   // Map 0-4095 to -127 to 127
   int mapped = map(value, 0, 4095, -127, 127);
   
-  // Apply deadzone (e.g., +/- 10)
-  if (abs(mapped) < 10) {
-    return 0;
-  }
-  
   // Clamp to be safe
   return constrain(mapped, -127, 127);
 }
