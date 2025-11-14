@@ -1,0 +1,622 @@
+<!-- added switch-activated version -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 BLE to WebRTC Gateway (Firebase Signaling)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4f46e5;
+            --secondary-color: #1f2937;
+            --text-color: #f3f4f6;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Dark background */
+            color: var(--text-color);
+        }
+        .container {
+            max-width: 100vw;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+        }
+        .joystick-canvas {
+            background: var(--secondary-color);
+            border: 2px solid var(--primary-color);
+            border-radius: 1rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            touch-action: none; 
+            cursor: default; 
+        }
+        #status-indicator-ble, #status-indicator-webrtc {
+            transition: background-color 0.5s, transform 0.3s;
+        }
+        .hidden-button {
+            visibility: hidden; /* Hide the button when auto-start is active */
+            height: 0;
+            padding: 0;
+            margin: 0;
+        }
+    </style>
+    
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+</head>
+<body>
+
+<div class="container mx-auto">
+    <h1 class="text-3xl font-bold text-center text-primary-color mb-4">BLE-to-WebRTC Robot Gateway (Switch Activated)</h1>
+    <p class="text-center text-sm text-gray-400 mb-6">WebRTC connection is activated by Switch 1 on the BLE controller.</p>
+
+    <div class="bg-gray-800 p-4 rounded-xl shadow-lg mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        <div class="p-3 border-r border-gray-700 md:border-r-0">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-xl font-semibold text-indigo-300">BLE Controller Status</h2>
+                <div id="status-indicator-ble" class="w-4 h-4 rounded-full bg-red-500 transform scale-100"></div>
+            </div>
+            <div id="status-message-ble" class="text-sm text-red-400 mb-3">Disconnected from ESP32.</div>
+            <button id="connect-ble" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 shadow-md">
+                Connect ESP32 (BLE)
+            </button>
+            <button id="calibrate-joysticks" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg mt-2 transition duration-300 shadow-md" disabled>
+                Calibrate Joysticks
+            </button>
+        </div>
+
+        <div class="p-3">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-xl font-semibold text-cyan-300">WebRTC Robot Status</h2>
+                <div id="status-indicator-webrtc" class="w-4 h-4 rounded-full bg-red-500 transform scale-100"></div>
+            </div>
+            <div id="status-message-webrtc" class="text-sm text-red-400 mb-3">Waiting for Switch 1 activation.</div>
+            <!-- The physical button is now hidden and serves only as a status indicator/placeholder -->
+            <button id="start-webrtc" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 shadow-md hidden-button">
+                Start WebRTC Connection (Auto Signal)
+            </button>
+        </div>
+    </div>
+
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-grow">
+
+        <div class="lg:col-span-2 bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col items-center">
+            <h3 class="text-lg font-semibold mb-2">J1: Pan/Tilt Control (Received)</h3>
+            <canvas id="joystick-j1" class="joystick-canvas w-full max-w-sm aspect-square"></canvas>
+            <div id="j1-display" class="mt-2 text-sm text-gray-400">X: 0, Y: 0</div>
+            <div id="j1-offset-display" class="mt-1 text-xs text-gray-500">Offset X: 0, Y: 0</div>
+        </div>
+
+        <div class="lg:col-span-1 flex flex-col space-y-6">
+            
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg">
+                <h3 class="text-lg font-semibold mb-3">Switches (SW Bitmask)</h3>
+                <div class="grid grid-cols-2 gap-3">
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-1" data-bit="0" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm font-bold text-yellow-300">Switch 1 (WebRTC Connect)</span>
+                    </label>
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-2" data-bit="1" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm">Switch 2 (Bit 1)</span>
+                    </label>
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-3" data-bit="2" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm">Switch 3 (Bit 2)</span>
+                    </label>
+                    <label class="flex items-center space-x-2 bg-gray-700 p-2 rounded-lg transition">
+                        <input type="checkbox" id="switch-4" data-bit="3" disabled class="h-4 w-4 text-primary-color border-gray-600 rounded opacity-50">
+                        <span class="text-sm">Switch 4 (Bit 3)</span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col items-center">
+                <h3 class="text-lg font-semibold mb-2">J2: Auxiliary Control (Received)</h3>
+                <canvas id="joystick-j2" class="joystick-canvas w-full max-w-xs aspect-square"></canvas>
+                <div id="j2-display" class="mt-2 text-sm text-gray-400">X: 0, Y: 0</div>
+                <div id="j2-offset-display" class="mt-1 text-xs text-gray-500">Offset X: 0, Y: 0</div>
+            </div>
+            
+        </div>
+    </div>
+    
+</div>
+
+<script>
+    // --- FIREBASE CONFIGURATION (USING USER'S PROVIDED KEYS) ---
+    const firebaseConfig = {
+    apiKey: "AIzaSyC-IQ1YVjx9VgYiv6QAox6eBd-EZ4r7aaA",
+    authDomain: "piwebrtc.firebaseapp.com",
+    projectId: "piwebrtc",
+    storageBucket: "piwebrtc.firebasestorage.app",
+    messagingSenderId: "504393007442",
+    appId: "1:504393007442:web:6e2749e901d581dbf37a8b",
+    measurementId: "G-TGGBB2K38W"
+    };
+
+    // Initialize Firebase and Firestore
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const CALLS_COLLECTION = 'robot_calls'; // Collection name
+    const ROOM_ID = 'esp32_robot_room'; // Fixed room ID for this specific connection
+    
+    // Global reference for the call document
+    let callDocRef = db.collection(CALLS_COLLECTION).doc(ROOM_ID);
+
+
+    // --- Configuration & Globals ---
+    const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+    const CONTROL_INTERVAL = 50; // ms (20 updates/sec for WebRTC)
+
+    let bleDevice = null;
+    let controlCharacteristic = null;
+    let pc = null;
+    let dataChannel = null;
+    let sendDataInterval = null;
+
+    // Latest data received from ESP32 BLE (RAW values)
+    let rawControlData = {
+        j1: { x: 0, y: 0 },
+        j2: { x: 0, y: 0 },
+        sw: 0
+    };
+    
+    // Variable to track the previous state of the WebRTC activation switch (Bit 0)
+    let wasWebRTCSwitchActive = false;
+    
+    // Offsets determined during calibration
+    let offsets = {
+        j1: { x: 0, y: 0, display: 'j1-offset-display' },
+        j2: { x: 0, y: 0, display: 'j2-offset-display' }
+    };
+    let isCalibrating = false;
+    let calibrationData = { j1x: [], j1y: [], j2x: [], j2y: [] };
+    const CALIBRATION_DURATION_MS = 5000; // 5 seconds
+
+
+    // Visualization data
+    const joystickVisuals = {
+        j1: { canvas: 'joystick-j1', display: 'j1-display' },
+        j2: { canvas: 'joystick-j2', display: 'j2-display' }
+    };
+
+
+    // --- Utility Functions ---
+    
+    function getCssVar(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function updateStatus(idSuffix, indicatorClass, message) {
+        const indicator = document.getElementById(`status-indicator-${idSuffix}`);
+        const msg = document.getElementById(`status-message-${idSuffix}`);
+        
+        indicator.className = `w-4 h-4 rounded-full ${indicatorClass} transform scale-100`;
+        msg.textContent = message;
+        msg.className = `text-sm ${indicatorClass.replace('bg-', 'text-')}`;
+    }
+    
+    // --- BLE Logic (Input from ESP32) ---
+
+    async function connectToBLE() {
+        if (!navigator.bluetooth) {
+            updateStatus('ble', 'bg-red-500', 'Web Bluetooth API is not available.');
+            return;
+        }
+
+        if (bleDevice && bleDevice.gatt.connected) {
+            bleDevice.gatt.disconnect();
+            // Also stop WebRTC if BLE disconnects manually
+            if (pc && pc.connectionState !== 'closed') {
+                pc.close();
+            }
+            return;
+        }
+
+        try {
+            updateStatus('ble', 'bg-yellow-500', 'Scanning for ESP32...');
+            
+            bleDevice = await navigator.bluetooth.requestDevice({
+                filters: [{ services: [SERVICE_UUID] }],
+                optionalServices: [SERVICE_UUID]
+            });
+
+            bleDevice.addEventListener('gattserverdisconnected', onBLEDisconnected);
+            updateStatus('ble', 'bg-yellow-500', `Connecting to ${bleDevice.name || 'Device'}...`);
+
+            const server = await bleDevice.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            controlCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+            await controlCharacteristic.startNotifications();
+            controlCharacteristic.addEventListener('characteristicvaluechanged', handleControlData);
+
+            updateStatus('ble', 'bg-green-500', `CONNECTED to ${bleDevice.name || 'ESP32'}! Receiving data.`);
+            document.getElementById('connect-ble').textContent = 'Disconnect ESP32';
+            document.getElementById('calibrate-joysticks').disabled = false;
+            
+            // Set initial WebRTC status message
+            updateStatus('webrtc', 'bg-red-500', 'Waiting for Switch 1 activation.');
+
+
+        } catch (error) {
+            console.error('BLE Connection Error:', error);
+            updateStatus('ble', 'bg-red-500', `Connection failed: ${error.message}`);
+            document.getElementById('connect-ble').textContent = 'Connect ESP32 (BLE)';
+        }
+    }
+
+    function onBLEDisconnected(event) {
+        const device = event.target;
+        console.log(`BLE Device ${device.name} disconnected.`);
+        updateStatus('ble', 'bg-red-500', `Disconnected from ${device.name}.`);
+        document.getElementById('connect-ble').textContent = 'Connect ESP32 (BLE)';
+        document.getElementById('calibrate-joysticks').disabled = true;
+        
+        // Ensure WebRTC is closed if BLE drops
+        if (pc && pc.connectionState !== 'closed') {
+            pc.close();
+        }
+        bleDevice = null;
+        controlCharacteristic = null;
+        updateStatus('webrtc', 'bg-red-500', 'Disconnected from Robot.');
+    }
+    
+    function handleControlData(event) {
+        const value = event.target.value; // DataView object
+        if (value.byteLength !== 5) {
+            console.warn(`Received unexpected data size: ${value.byteLength} bytes (expected 5)`);
+            return;
+        }
+        
+        // Decode the 5-byte struct from ESP32 (RAW values)
+        const j1_x_raw = value.getInt8(1); // Pan/Tilt X
+        const j1_y_raw = value.getInt8(0); // Pan/Tilt Y
+        const j2_x_raw = value.getInt8(2); // Aux X
+        const j2_y_raw = value.getInt8(3); // Aux Y
+        const switches = value.getUint8(4);
+        
+        // 1. Update RAW Global Control Data
+        rawControlData.j1.x = j1_x_raw;
+        rawControlData.j1.y = j1_y_raw;
+        rawControlData.j2.x = j2_x_raw;
+        rawControlData.j2.y = j2_y_raw;
+        rawControlData.sw = switches;
+
+        // 2. Calibration State Check
+        if (isCalibrating) {
+            calibrationData.j1x.push(j1_x_raw);
+            calibrationData.j1y.push(j1_y_raw);
+            calibrationData.j2x.push(j2_x_raw);
+            calibrationData.j2y.push(j2_y_raw);
+            return; // Don't process for display/send during calibration
+        }
+
+        // 3. APPLY CALIBRATION OFFSETS and CHECK WEB RTC ACTIVATION
+        
+        // Check state of Switch 1 (Bit 0)
+        const isSwitchActive = (switches & (1 << 0)) !== 0; 
+        
+        if (isSwitchActive && !wasWebRTCSwitchActive) {
+            // TRANSITION: OFF -> ON
+            console.log("Switch 1 Pressed: Starting WebRTC.");
+            startWebRTC();
+        } else if (!isSwitchActive && wasWebRTCSwitchActive) {
+            // TRANSITION: ON -> OFF (Optional: Disconnect on switch release)
+            // The logic here is for continuous listening, so we only handle the ON press.
+            // If you wanted to close the connection on release, you'd put pc.close() here.
+        }
+        
+        // Update the state tracker
+        wasWebRTCSwitchActive = isSwitchActive;
+        
+        // Apply Calibration Offsets
+        const j1_x_cal = j1_x_raw - offsets.j1.x;
+        const j1_y_cal = j1_y_raw - offsets.j1.y;
+        const j2_x_cal = j2_x_raw - offsets.j2.x;
+        const j2_y_cal = j2_y_raw - offsets.j2.y;
+
+        // 4. Update Visualizations (using calibrated values)
+        updateJoystickDisplay(j1_x_cal, j1_y_cal, 'j1');
+        updateJoystickDisplay(j2_x_cal, j2_y_cal, 'j2');
+        updateSwitches(switches);
+    }
+
+    // --- Calibration Logic (SAME) ---
+
+    function startCalibration() {
+        if (!bleDevice || !bleDevice.gatt.connected) {
+            updateStatus('ble', 'bg-red-500', 'Connect to ESP32 first to calibrate!');
+            return;
+        }
+
+        isCalibrating = true;
+        calibrationData = { j1x: [], j1y: [], j2x: [], j2y: [] };
+
+        const calibrateButton = document.getElementById('calibrate-joysticks');
+        calibrateButton.disabled = true;
+        updateStatus('ble', 'bg-yellow-500', `CALIBRATING (5s): DO NOT TOUCH JOYS!`);
+
+        // Update button text and start timer
+        let timeLeft = CALIBRATION_DURATION_MS / 1000;
+        calibrateButton.textContent = `Calibrating... ${timeLeft}s`;
+
+        const countdown = setInterval(() => {
+            timeLeft--;
+            calibrateButton.textContent = `Calibrating... ${timeLeft}s`;
+            if (timeLeft <= 0) {
+                clearInterval(countdown);
+                processCalibrationData();
+            }
+        }, 1000);
+    }
+
+    function processCalibrationData() {
+        isCalibrating = false;
+        const calibrateButton = document.getElementById('calibrate-joysticks');
+        
+        const calcAvg = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+        
+        if (calibrationData.j1x.length === 0) {
+            updateStatus('ble', 'bg-red-500', 'Calibration failed: No data received.');
+            calibrateButton.disabled = false;
+            calibrateButton.textContent = 'Calibrate Joysticks';
+            return;
+        }
+
+        // Calculate and apply J1 offsets
+        offsets.j1.x = Math.round(calcAvg(calibrationData.j1x));
+        offsets.j1.y = Math.round(calcAvg(calibrationData.j1y));
+
+        // Calculate and apply J2 offsets
+        offsets.j2.x = Math.round(calcAvg(calibrationData.j2x));
+        offsets.j2.y = Math.round(calcAvg(calibrationData.j2y));
+
+        // Update offset display
+        document.getElementById(offsets.j1.display).textContent = `Offset X: ${offsets.j1.x}, Y: ${offsets.j1.y}`;
+        document.getElementById(offsets.j2.display).textContent = `Offset X: ${offsets.j2.x}, Y: ${offsets.j2.y}`;
+
+        updateStatus('ble', 'bg-green-500', 'Calibration Complete. Offsets saved.');
+        calibrateButton.textContent = 'Calibrate Joysticks';
+        calibrateButton.disabled = false;
+    }
+
+
+    // --- WebRTC Logic (Modified) ---
+
+    async function startWebRTC() {
+        // Prevent starting if already running or if BLE is not connected
+        if (pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting')) return;
+        if (!bleDevice || !bleDevice.gatt.connected) {
+             updateStatus('webrtc', 'bg-red-500', 'Connect BLE first to start WebRTC.');
+             return;
+        }
+        
+        updateStatus('webrtc', 'bg-yellow-500', 'Starting WebRTC and Firebase Signaling...');
+        const startButton = document.getElementById('start-webrtc');
+        startButton.disabled = true;
+
+        // Clear previous room data from Firestore
+        await callDocRef.delete().catch(e => console.log("No existing room to delete."));
+        
+        pc = new RTCPeerConnection({
+            // NOTE: Add your TURN server here if connecting outside your local network!
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] 
+        });
+        
+        // 1. Setup ICE Candidate handler (Caller)
+        const offerCandidatesCollection = callDocRef.collection('offerCandidates');
+        pc.onicecandidate = event => {
+            if (event.candidate) {
+                offerCandidatesCollection.add(event.candidate.toJSON());
+            }
+        };
+
+        // 2. Data Channel Setup
+        dataChannel = pc.createDataChannel("controls");
+        dataChannel.onopen = () => {
+            console.log("WebRTC Data Channel opened");
+            updateStatus('webrtc', 'bg-green-500', 'CONNECTED! Transmitting controls to Robot.');
+            sendDataInterval = setInterval(sendControlData, CONTROL_INTERVAL);
+        };
+        dataChannel.onclose = () => {
+            console.log("WebRTC Data Channel closed");
+            updateStatus('webrtc', 'bg-red-500', 'WebRTC Disconnected.');
+            clearInterval(sendDataInterval);
+            startButton.disabled = false; // Note: Button is visually hidden but state is needed
+        };
+        dataChannel.onerror = (error) => {
+            console.error("WebRTC Data Channel Error:", error);
+            updateStatus('webrtc', 'bg-red-500', `Data Channel Error: ${error.message}`);
+        };
+
+        // 3. Connection State Change
+        pc.onconnectionstatechange = () => {
+            console.log(`WebRTC state: ${pc.connectionState}`);
+            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                updateStatus('webrtc', 'bg-red-500', `Connection failed or closed: ${pc.connectionState}`);
+                startButton.disabled = false;
+                clearInterval(sendDataInterval);
+            } else if (pc.connectionState === 'connecting') {
+                updateStatus('webrtc', 'bg-yellow-500', 'Connecting...');
+            }
+        };
+        
+        // 4. Create Offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        
+        // 5. Write Offer to Firestore
+        const offerData = {
+            offer: {
+                sdp: offer.sdp,
+                type: offer.type
+            }
+        };
+        await callDocRef.set(offerData); // Create/overwrite the room with the offer
+
+        updateStatus('webrtc', 'bg-blue-500', 'Offer sent. Waiting for Robot Answer...');
+
+        // 6. Listen for Answer (Caller)
+        callDocRef.onSnapshot(async snapshot => {
+            const data = snapshot.data();
+            if (data && data.answer && !pc.currentRemoteDescription) {
+                console.log('Received Answer:', data.answer);
+                const answerDescription = new RTCSessionDescription(data.answer);
+                await pc.setRemoteDescription(answerDescription);
+                listenForAnswerCandidates(); 
+            }
+        });
+    }
+    
+    function listenForAnswerCandidates() {
+        const answerCandidatesCollection = callDocRef.collection('answerCandidates');
+
+        answerCandidatesCollection.onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(async change => {
+                if (change.type === 'added') {
+                    const candidate = new RTCIceCandidate(change.doc.data());
+                    await pc.addIceCandidate(candidate);
+                }
+            });
+        });
+    }
+
+    function sendControlData() {
+        // Check if WebRTC is connected AND BLE is providing data
+        if (dataChannel && dataChannel.readyState === 'open') {
+            
+            // Apply offsets to RAW data before sending!
+            const j1_x_cal = rawControlData.j1.x - offsets.j1.x;
+            const j1_y_cal = rawControlData.j1.y - offsets.j1.y;
+            const j2_x_cal = rawControlData.j2.x - offsets.j2.x;
+            const j2_y_cal = rawControlData.j2.y - offsets.j2.y;
+            
+            const payload = {
+                j1: { x: j1_x_cal, y: j1_y_cal },
+                j2: { x: j2_x_cal, y: j2_y_cal },
+                sw: rawControlData.sw
+            };
+            
+            try {
+                // Send JSON payload to the Raspberry Pi
+                dataChannel.send(JSON.stringify(payload));
+            } catch (e) {
+                console.warn("Failed to send data:", e);
+            }
+        }
+    }
+
+
+    // --- Visualization Functions (SAME) ---
+    
+    function updateSwitches(bitmask) {
+        document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            const bit = parseInt(checkbox.getAttribute('data-bit'));
+            checkbox.checked = (bitmask & (1 << bit)) !== 0;
+        });
+    }
+
+    function updateJoystickDisplay(mappedX, mappedY, dataKey) {
+        const canvas = document.getElementById(joystickVisuals[dataKey].canvas);
+        if (!canvas) return;
+        
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const maxRadius = Math.min(centerX, centerY) * 0.45; // Max displacement
+
+        // Fix: Map the input range (-127 to 127) to maxRadius displacement.
+        const deltaX = (mappedX / 127) * maxRadius;
+        const deltaY = (-mappedY / 127) * maxRadius; // Invert Y for canvas coordinate system
+        
+        document.getElementById(joystickVisuals[dataKey].display).textContent = `X: ${mappedX}, Y: ${mappedY}`;
+
+        drawJoystick(joystickVisuals[dataKey].canvas, deltaX, deltaY);
+    }
+
+    function drawJoystick(id, x = 0, y = 0) {
+        const canvas = document.getElementById(id);
+        const ctx = canvas.getContext('2d');
+        
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = Math.min(centerX, centerY) * 0.45; 
+        const stickRadius = radius * 0.5; 
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw boundary circle
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius * 1.5, 0, Math.PI * 2, false);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = getCssVar('--primary-color'); 
+        ctx.stroke();
+
+        // Draw center stick
+        const stickX = centerX + x;
+        const stickY = centerY + y;
+        
+        ctx.beginPath();
+        ctx.arc(stickX, stickY, stickRadius, 0, Math.PI * 2, false);
+        ctx.fillStyle = getCssVar('--primary-color');
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.stroke();
+
+        // Draw center dot (Visual reference for the calibrated zero point)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 3, 0, Math.PI * 2, false);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+    }
+
+    function initJoystick(id) {
+        const canvas = document.getElementById(id);
+        
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            drawJoystick(id, 0, 0);
+        }
+
+        const resizeObserver = new ResizeObserver(resizeCanvas);
+        resizeObserver.observe(canvas);
+        
+        resizeCanvas();
+    }
+
+    // Cleanup Firebase room when leaving the page
+    window.addEventListener('beforeunload', async () => {
+        if (callDocRef) {
+            // Best effort cleanup without awaiting
+            callDocRef.delete().catch(e => console.log("Cleanup failed or room already gone."));
+        }
+    });
+
+    // --- Initialization ---
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initJoystick('joystick-j1');
+        initJoystick('joystick-j2');
+
+        document.getElementById('connect-ble').addEventListener('click', connectToBLE);
+        document.getElementById('calibrate-joysticks').addEventListener('click', startCalibration);
+        
+        // NOTE: The click handler for 'start-webrtc' is REMOVED. 
+        // Activation is now controlled by the BLE switch inside handleControlData.
+    });
+</script>
+
+</body>
+</html>

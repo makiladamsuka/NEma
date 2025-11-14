@@ -22,7 +22,7 @@
 #include <BLE2902.h> // For BLE Notifications
 
 // --- Pin Definitions ---
-// Use any ADC1 pins for joysticks (e.g., 32, 33, 34, 35, 36, 39)
+// Use any ADC1 pins for joysticks (e.g., 32, 33, 34, 35, 36, 39)c:\Users\makil\Documents\python\NEma\NEma\firebase\index3.html
 #define JOY1_X_PIN 34
 #define JOY1_Y_PIN 35
 #define JOY2_X_PIN 32
