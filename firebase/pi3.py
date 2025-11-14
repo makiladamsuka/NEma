@@ -3,37 +3,53 @@ import json
 import firebase_admin
 from firebase_admin import credentials, firestore
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
-from aiortc.mediastreams import MediaStreamTrack
-import os # Added for path expansion
+import os
 
-# --- Configuration ---
-# REPLACE with the correct path to your Firebase service account key
-# Use os.path.expanduser to correctly handle '~/'
+# --- Configuration & Globals ---
+# CRITICAL: REPLACE with the correct path to your Firebase service account key
 FIREBASE_KEY_PATH = os.path.expanduser('/home/nema/Documents/NEma/firebase/serviceAccountKey.json') 
 ROOM_ID = 'esp32_robot_room' 
 CALLS_COLLECTION = 'robot_calls'
 CONNECTION_ESTABLISHED = False
 
-# Global variable to hold the main event loop
+# Global variables for async loop and PeerConnection
 MAIN_EVENT_LOOP = None
+pc = None 
 
 # --- Firebase Setup ---
 try:
-    # Use a service account
+    if not os.path.exists(FIREBASE_KEY_PATH):
+        raise FileNotFoundError(f"Firebase key not found at {FIREBASE_KEY_PATH}")
+        
     cred = credentials.Certificate(FIREBASE_KEY_PATH)
     firebase_admin.initialize_app(cred)
-except FileNotFoundError:
-    print(f"ERROR: Firebase key not found at {FIREBASE_KEY_PATH}. Please check the path.")
+except FileNotFoundError as e:
+    print(f"FATAL ERROR: {e}")
     exit()
 except Exception as e:
-    print(f"ERROR initializing Firebase: {e}")
+    print(f"FATAL ERROR initializing Firebase: {e}")
     exit()
 
 db = firestore.client()
 call_doc_ref = db.collection(CALLS_COLLECTION).document(ROOM_ID)
-pc = None # Global PeerConnection reference
 
-# --- Data Handling ---
+# --- Robot Safety and Control ---
+
+def stop_robot_safety_system():
+    """
+    SAFETY FUNCTION: Immediately stops all motors/actuators.
+    This function MUST be synchronous (no 'await').
+    """
+    print("\n\n***************************************************")
+    print("*** SAFETY STOP ACTIVATED: Browser Disconnected ***")
+    print("***************************************************")
+    
+    # ----------------------------------------------------
+    # TODO: IMPLEMENT YOUR SPECIFIC HARDWARE STOP COMMANDS HERE!
+    # Example concepts (replace with actual GPIO/PWM code for your Pi):
+    # motor_controller.set_speed(0) 
+    # servo_controller.set_angle('pan', 90) 
+    # ----------------------------------------------------
 
 def handle_joystick_data(message):
     """
@@ -45,23 +61,17 @@ def handle_joystick_data(message):
         j2 = data.get('j2', {})
         sw = data.get('sw', 0)
         
-        # J1 (Pan/Tilt)
         j1_x = j1.get('x', 0)
         j1_y = j1.get('y', 0)
-        
-        # J2 (Auxiliary)
         j2_x = j2.get('x', 0)
         j2_y = j2.get('y', 0)
 
-        # Analogy: The script is the engine receiving directions 
-        # (joystick values) to translate into action (angles/speeds).
-        
         print("\n--- Received Control Data ---")
         print(f"J1 (Pan/Tilt): X={j1_x}, Y={j1_y}")
         print(f"J2 (Auxiliary): X={j2_x}, Y={j2_y}")
         print(f"Switches (Bitmask): {sw} (SW1: {(sw & 1) > 0}, SW2: {(sw & 2) > 0})")
         
-        # Example: Map joystick range (-127 to 127) to a servo angle range (-90 to +90)
+        # Example: Map -127 to 127 to an angle range like -90 to +90
         pan_angle = int(j1_x / 127 * 90)  
         tilt_angle = int(j1_y / 127 * 90) 
         print(f"Calculated Angles: Pan={pan_angle}° (from J1 X), Tilt={tilt_angle}° (from J1 Y)")
@@ -71,102 +81,40 @@ def handle_joystick_data(message):
     except Exception as e:
         print(f"Error processing data: {e}")
 
-# --- WebRTC & Signaling Logic ---
 
-# Use a global flag to ensure the process_offer_snapshot runs only once per offer
+# --- WebRTC & Signaling Core ---
+
+# Flag to ensure the offer is processed only once per new connection attempt
 OFFER_PROCESSED = False
+
+async def cleanup_firebase_room():
+    """
+    Deletes the signaling room in Firestore after disconnection.
+    Uses asyncio.to_thread to safely handle the synchronous Firebase Admin SDK.
+    """
+    print("Cleaning up Firebase room...")
+    try:
+        # FIX: Use asyncio.to_thread to wrap the synchronous call to prevent the
+        # "DatetimeWithNanoseconds can't be used in 'await' expression" error.
+        await asyncio.to_thread(call_doc_ref.delete)
+        
+        print("Room document deleted. Ready for next browser connection.")
+    except Exception as e:
+        print(f"Error during Firebase cleanup: {e}")
+
 
 def handle_snapshot_in_thread(col_snapshot):
     """
     Callback executed in the synchronous Firebase thread. 
-    Schedules the async processing function onto the main event loop.
+    Safely schedules the async processing function onto the main event loop.
     """
     global MAIN_EVENT_LOOP
     
     if MAIN_EVENT_LOOP and MAIN_EVENT_LOOP.is_running():
-        # Safely schedule the async function to run on the main loop
         asyncio.run_coroutine_threadsafe(
             process_offer_snapshot(col_snapshot),
             MAIN_EVENT_LOOP
         )
-    # If the loop isn't running, it means the program is shutting down, so we do nothing.
-
-
-async def process_offer_snapshot(col_snapshot):
-    global OFFER_PROCESSED, CONNECTION_ESTABLISHED, pc
-    
-    if OFFER_PROCESSED or CONNECTION_ESTABLISHED:
-        return
-
-    # Check if the document has the offer data
-    try:
-        doc = col_snapshot[0]
-        data = doc.to_dict()
-    except IndexError:
-        # Document doesn't exist yet (e.g., deleted by the caller)
-        return 
-
-    if 'offer' in data and not CONNECTION_ESTABLISHED:
-        OFFER_PROCESSED = True
-        print("Offer received! Processing...")
-        
-        offer = RTCSessionDescription(
-            sdp=data['offer']['sdp'],
-            type=data['offer']['type'])
-
-        pc = RTCPeerConnection()
-        
-        @pc.on("datachannel")
-        def on_datachannel(channel):
-            global CONNECTION_ESTABLISHED
-            print(f"Data channel opened: {channel.label}")
-            
-            @channel.on("message")
-            def on_message(message):
-                handle_joystick_data(message)
-
-            @channel.on("open")
-            def on_open():
-                CONNECTION_ESTABLISHED = True
-                print("WebRTC DataChannel OPENED. Starting control loop.")
-
-            @channel.on("close")
-            def on_close():
-                CONNECTION_ESTABLISHED = False
-                print("WebRTC DataChannel CLOSED.")
-                # Exit the program when the connection is closed
-                if MAIN_EVENT_LOOP and MAIN_EVENT_LOOP.is_running():
-                    MAIN_EVENT_LOOP.stop()
-
-
-        # --- ICE Candidate Gathering (Answerer) ---
-        offer_candidates_ref = call_doc_ref.collection('offerCandidates')
-        # 1. Listen for Caller's ICE Candidates (using the same thread-safe pattern)
-        offer_candidates_ref.on_snapshot(lambda col_snapshot, changes, read_time: 
-            handle_ice_snapshot_in_thread(pc, col_snapshot))
-
-        # 2. Collect own ICE Candidates and write them to Firestore
-        answer_candidates_ref = call_doc_ref.collection('answerCandidates')
-        @pc.on("icecandidate")
-        async def on_icecandidate(candidate):
-            if candidate:
-                answer_candidates_ref.add(candidate.toJSON())
-
-        # 3. Create and Send Answer
-        await pc.setRemoteDescription(offer)
-        answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-        
-        answer_data = {
-            'answer': {
-                'sdp': pc.localDescription.sdp,
-                'type': pc.localDescription.type
-            }
-        }
-        # Update the room document with the Answer
-        await call_doc_ref.update(answer_data)
-        print("Answer sent to Firestore. Connection process initiated.")
-
 
 def handle_ice_snapshot_in_thread(pc_instance, col_snapshot):
     """
@@ -184,16 +132,102 @@ async def add_ice_candidates(pc_instance, col_snapshot):
         if change.type.name == 'ADDED':
             candidate_data = change.document.to_dict()
             try:
-                # Need to filter out empty candidate data often seen during signaling
                 if candidate_data.get('candidate'):
                     candidate = RTCIceCandidate(**candidate_data)
                     await pc_instance.addIceCandidate(candidate)
             except Exception as e:
                 print(f"Error adding ICE candidate: {e}")
 
+
+async def process_offer_snapshot(col_snapshot):
+    global OFFER_PROCESSED, CONNECTION_ESTABLISHED, pc
+    
+    # Block processing if already connected or if offer is already being handled
+    if CONNECTION_ESTABLISHED:
+        return
+
+    # Check for offer data
+    try:
+        doc = col_snapshot[0]
+        data = doc.to_dict()
+    except IndexError:
+        return 
+
+    if 'offer' in data and not OFFER_PROCESSED:
+        OFFER_PROCESSED = True # Mark as processing to avoid race conditions
+        print("Offer received! Processing...")
+        
+        offer = RTCSessionDescription(
+            sdp=data['offer']['sdp'],
+            type=data['offer']['type'])
+
+        # Create a new PeerConnection for every new call
+        pc = RTCPeerConnection() 
+        
+        @pc.on("datachannel")
+        def on_datachannel(channel):
+            print(f"Data channel opened: {channel.label}")
+            
+            @channel.on("message")
+            def on_message(message):
+                handle_joystick_data(message)
+
+            @channel.on("open")
+            def on_open():
+                global CONNECTION_ESTABLISHED
+                CONNECTION_ESTABLISHED = True
+                print("WebRTC DataChannel OPENED. Starting control loop.")
+
+            @channel.on("close")
+            def on_close():
+                global CONNECTION_ESTABLISHED, OFFER_PROCESSED
+                print("WebRTC DataChannel CLOSED.")
+                
+                # 1. CRITICAL: STOP THE ROBOT IMMEDIATELY
+                stop_robot_safety_system() 
+                
+                # 2. Reset connection flags to allow a new incoming call
+                CONNECTION_ESTABLISHED = False
+                OFFER_PROCESSED = False
+                
+                # 3. Schedule ASYNC cleanup (Thread-safe)
+                if MAIN_EVENT_LOOP and MAIN_EVENT_LOOP.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        cleanup_firebase_room(),
+                        MAIN_EVENT_LOOP
+                    )
+                # Script remains running due to the infinite loop in run_answerer.
+
+
+        # --- ICE Candidate Handling ---
+        offer_candidates_ref = call_doc_ref.collection('offerCandidates')
+        offer_candidates_ref.on_snapshot(lambda col_snapshot, changes, read_time: 
+            handle_ice_snapshot_in_thread(pc, col_snapshot))
+
+        answer_candidates_ref = call_doc_ref.collection('answerCandidates')
+        @pc.on("icecandidate")
+        async def on_icecandidate(candidate):
+            if candidate:
+                answer_candidates_ref.add(candidate.toJSON())
+
+        # 3. Create and Send Answer
+        await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        
+        answer_data = {
+            'answer': {
+                'sdp': pc.localDescription.sdp,
+                'type': pc.localDescription.type
+            }
+        }
+        await call_doc_ref.update(answer_data)
+        print("Answer sent to Firestore. Connection process initiated.")
+
+
 async def run_answerer():
-    global CONNECTION_ESTABLISHED, MAIN_EVENT_LOOP
-    print("Waiting for WebRTC Offer in Firestore...")
+    global MAIN_EVENT_LOOP
+    print("WebRTC Robot Answerer starting in CONTINUOUS LISTEN mode...")
     
     # Get the current running event loop in the main thread
     MAIN_EVENT_LOOP = asyncio.get_running_loop() 
@@ -202,25 +236,17 @@ async def run_answerer():
     call_doc_ref.on_snapshot(lambda col_snapshot, changes, read_time: 
                              handle_snapshot_in_thread(col_snapshot))
 
-    # Keep the script running while waiting for connection
-    while not CONNECTION_ESTABLISHED:
+    print("Listening for new WebRTC Offers...")
+    
+    # The script now runs indefinitely, waiting for new calls.
+    while True:
         await asyncio.sleep(1)
 
-    # After connection, keep running to receive data until disconnected
-    while CONNECTION_ESTABLISHED:
-        await asyncio.sleep(1)
-        
-    print("Connection closed. Exiting.")
 
 if __name__ == "__main__":
     try:
-        # Check if the Firebase key path exists before starting
-        if not os.path.exists(FIREBASE_KEY_PATH):
-            print(f"FATAL ERROR: Firebase key not found at {FIREBASE_KEY_PATH}. Please check the path and try again.")
-            exit()
-            
         asyncio.run(run_answerer())
     except KeyboardInterrupt:
-        print("\nProgram interrupted by user. Cleaning up...")
+        print("\nProgram interrupted by user. Shutting down gracefully...")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
