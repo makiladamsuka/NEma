@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple WebRTC Call</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="videos">
+        <video id="webcamVideo" autoplay playsinline muted></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <div class="controls">
+        <button id="webcamButton">Start Webcam</button>
+        <button id="callButton" disabled>Create Call</button>
+        <button id="answerButton" disabled>Answer Call</button>
+        <button id="hangupButton" disabled>Hang Up</button>
+    </div>
+
+    <div class="call-id-box">
+        <label for="callInput">Call ID:</label>
+        <input id="callInput" type="text" placeholder="Enter Call ID">
+    </div>
+    
+    <script src="app.js"></script> 
+</body>
+</html>
