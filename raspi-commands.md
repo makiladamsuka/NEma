@@ -5,7 +5,7 @@ Raspberrypi commands
 Install Python 3.12 with pyenv
 ```powershell
 pyenv install 3.12
-````
+```
 
 Verify the installation:
 ```powershell
@@ -27,7 +27,7 @@ Create the Virtual Environment
 pyenv virtualenv 3.12 mediapipe_312_env
 ```
 
-Acticate the Virtual Environment
+Activate the Virtual Environment
 ```powershell
 pyenv activate mediapipe_312_env
 ```
